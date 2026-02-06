@@ -28,7 +28,8 @@ A Claude Code plugin that helps Claude write correct, idiomatic Stata code. Cove
 In Claude Code, run:
 
 ```
-/install-skill https://github.com/dylantmoore/stata-skill
+/plugin marketplace add dylantmoore/stata-skill
+/plugin install stata@dylantmoore-stata-skill
 ```
 
 ## How It Works
