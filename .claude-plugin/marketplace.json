@@ -6,7 +6,7 @@
   "plugins": [
     {
       "name": "stata",
-      "source": ".",
+      "source": "./",
       "description": "Comprehensive Stata reference for writing correct Stata code — covers syntax, data management, econometrics, causal inference, graphics, Mata, and 20 community packages."
     }
   ]
