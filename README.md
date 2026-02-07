@@ -52,8 +52,6 @@ The skill uses **progressive disclosure**: a compact routing table (~370 lines) 
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for how to add documentation for new Stata packages. Pull requests welcome!
 
-## License & Disclaimer
+## Disclaimer
 
-[CC0 1.0](LICENSE) — No copyright claimed. This reference material is derived from Stata's official documentation and community package documentation. Use it however you like.
-
-Stata is a registered trademark of StataCorp LLC. This project is not affiliated with or endorsed by StataCorp.
+This reference material is derived from Stata's official documentation and community package documentation. No copyright is claimed. Stata is a registered trademark of StataCorp LLC. This project is not affiliated with or endorsed by StataCorp.

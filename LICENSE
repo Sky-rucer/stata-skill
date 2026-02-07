@@ -1,24 +1,8 @@
-CC0 1.0 Universal
+DISCLAIMER
 
-Statement of Purpose
+This repository contains reference material derived from Stata's
+official documentation and community package documentation. The
+author does not claim copyright over this material.
 
-This repository contains reference documentation derived from Stata's
-official documentation and community package documentation. The author
-does not claim copyright over this material and makes no assertion of
-ownership.
-
-To the extent possible under law, the person who associated CC0 with
-this work has waived all copyright and related or neighboring rights
-to this work.
-
-You can copy, modify, distribute, and use the work, even for
-commercial purposes, all without asking permission.
-
-For more information, see <https://creativecommons.org/publicdomain/zero/1.0/>.
-
-Disclaimer
-
-Stata is a registered trademark of StataCorp LLC. This project is not
-affiliated with, endorsed by, or sponsored by StataCorp. The reference
-material here is provided as a convenience for users of Claude Code and
-is derived from publicly available documentation.
+Stata is a registered trademark of StataCorp LLC. This project is
+not affiliated with, endorsed by, or sponsored by StataCorp.
