@@ -54,4 +54,4 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for how to add documentation for new Stat
 
 ## Disclaimer
 
-This reference material is derived from Stata's official documentation and community package documentation. No copyright is claimed. Stata is a registered trademark of StataCorp LLC. This project is not affiliated with or endorsed by StataCorp.
+This reference material is derived in part from Stata's official documentation and community package documentation. No copyright is claimed. Stata is a registered trademark of StataCorp LLC. This project is not affiliated with or endorsed by StataCorp.
