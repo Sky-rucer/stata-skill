@@ -45,11 +45,17 @@ As long as you can find an existing package somewhere, you can just let Claude g
 
 ## Installation
 
-In Claude Code, run:
+In Claude Code, first add the repo:
 
 ```
 /plugin marketplace add dylantmoore/stata-skill
+```
+
+Then install whichever skills you need:
+
+```
 /plugin install stata@dylantmoore-stata-skill
+/plugin install stata-c-plugins@dylantmoore-stata-skill
 ```
 
 ## How It Works
