@@ -8,6 +8,11 @@
       "name": "stata",
       "source": "./",
       "description": "Comprehensive Stata reference for writing correct Stata code — covers syntax, data management, econometrics, causal inference, graphics, Mata, and 20 community packages."
+    },
+    {
+      "name": "stata-c-plugins",
+      "source": "./",
+      "description": "Develop high-performance C plugins for Stata using the stplugin.h SDK. Covers SDK setup, data flow, memory safety, .ado wrappers, cross-platform compilation, performance optimization, debugging, packaging, and translating Python/R packages into Stata."
     }
   ]
 }

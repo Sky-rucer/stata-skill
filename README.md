@@ -1,8 +1,16 @@
-# Stata Skill for Claude Code
+# Stata Skills for Claude Code
 
-A Claude Code plugin that helps Claude write correct, idiomatic Stata code. Covers core Stata syntax, data management, econometrics, causal inference, graphics, Mata programming, and 17+ community packages.
+This project contains two Claude Code skills:
+
+1. **Stata** — A comprehensive reference that tells Claude how to use Stata. Covers core syntax, data management, econometrics, causal inference, graphics, and 20+ community packages.
+
+2. **Stata C Plugins** — A skill that tells Claude how to make Stata code that uses C plugins to do things. It includes information that Claude can use to translate existing packages into C plugins that can be called from Stata. This is very useful because it means you can do things in Stata that you wouldn't otherwise be able to do very easily.
+
+As long as you can find an existing package somewhere, you can just let Claude go look at the existing Python package and this skill provides a workflow that Claude can use to develop a replication of whatever it is, implemented in Python or R or whatever, that runs in Stata and uses a C plugin. In many if not most cases, you should be able to get something that runs at least as fast in Stata as it did in the original language, if not faster.
 
 ## What's Included
+
+### Skill 1: Stata
 
 **37 core reference files** covering:
 - Data import/export, management, and cleaning
@@ -23,6 +31,18 @@ A Claude Code plugin that helps Claude write correct, idiomatic Stata code. Cove
 - `ivreg2` / `xtabond2` — IV and dynamic panel GMM
 - And more (binsreg, coefplot, grstyle, winsor2, gtools, ...)
 
+### Skill 2: Stata C Plugins
+
+**Reference files** covering:
+- Stata plugin SDK (`stplugin.h`) setup and data flow
+- Memory safety, debugging, and common failure modes
+- `.ado` wrapper patterns (preserve/merge, plugin loading)
+- Cross-platform compilation (macOS, Linux, Windows)
+- Performance optimization (pthreads, pre-sorted indices, XorShift RNG)
+- Packaging and distribution via `net install`
+- Translation workflow for porting Python/R packages to Stata
+- Testing strategy with correlation-based validation against reference implementations
+
 ## Installation
 
 In Claude Code, run:
@@ -34,7 +54,7 @@ In Claude Code, run:
 
 ## How It Works
 
-The skill uses **progressive disclosure**: a compact routing table (~370 lines) loaded on activation directs Claude to read only the 1-3 reference files relevant to the current task. This keeps context usage efficient while giving Claude access to 57 detailed reference documents when needed.
+Both skills use **progressive disclosure**: a compact SKILL.md file loaded on activation directs Claude to read only the reference files relevant to the current task. This keeps context usage efficient while giving Claude access to detailed reference documents when needed.
 
 ## Coverage
 
@@ -47,6 +67,7 @@ The skill uses **progressive disclosure**: a compact routing table (~370 lines) 
 | Programming | 6 | Do-files, macros, loops, Mata |
 | Output & Workflow | 3 | Tables, reporting, best practices, external tools |
 | Packages | 20 | Community-contributed packages |
+| C Plugins | 4 | SDK patterns, performance, packaging, translation |
 
 ## Contributing
 
