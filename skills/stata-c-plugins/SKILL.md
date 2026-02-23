@@ -231,7 +231,7 @@ For slightly faster loading, check `c(os)` first to try the most likely platform
 
 ## Cross-Platform Compilation
 
-Build for four platforms:
+Build for four platforms. Install the Windows cross-compiler first: `brew install mingw-w64`.
 
 | Platform | Compiler | `-D` flag | Link flag | pthreads |
 |----------|----------|-----------|-----------|----------|
@@ -247,6 +247,17 @@ All platforms: `-O3 -fPIC` for release, add `-g -fsanitize=address` for developm
 Naming convention: `pluginname.platform.plugin` (e.g., `qrf_plugin.darwin-arm64.plugin`).
 
 macOS note: use `-bundle`, NOT `-shared`. This is a common mistake.
+
+### Linux from macOS (Docker Required)
+
+There is no native Linux cross-compiler on macOS. Use Docker via Colima (`brew install colima docker`, then `colima start`). Build with a one-liner:
+
+```bash
+docker run --rm --platform linux/amd64 -v "$(pwd):/build" -w /build ubuntu:18.04 \
+    bash -c "apt-get update -qq && apt-get install -y -qq g++ gcc make > /dev/null 2>&1 && make linux"
+```
+
+**glibc compatibility:** Build on Ubuntu 18.04 for maximum compatibility (requires only GLIBC 2.14, works on any Linux from ~2012+). Building on Ubuntu 22.04+ requires GLIBC 2.34, which excludes RHEL 8, Ubuntu 20.04, and many HPC environments.
 
 See `references/build_and_compile.md` for a full build script template.
 
@@ -323,6 +334,8 @@ Users install with:
 net install mypackage, from("https://raw.githubusercontent.com/user/repo/main") replace
 ```
 
+All platform binaries ship to all users via `net install` -- Stata loads only the matching one at runtime. Windows C++ binaries can be 10-15MB due to static linking, which is normal.
+
 See `references/packaging_and_help.md` for `.toc`, `.pkg`, `.sthlp` templates and SMCL formatting.
 
 ## Common Pitfalls
@@ -346,6 +359,8 @@ See `references/packaging_and_help.md` for `.toc`, `.pkg`, `.sthlp` templates an
 9. **pthreads on Windows needs `-lwinpthread`.** Use conditional linker flags.
 
 10. **Memory errors crash Stata with no recovery.** Pre-allocate everything, check every allocation, build with sanitizers during development.
+
+11. **glibc version mismatch.** Building Linux plugins on a modern distro produces binaries that won't load on older systems. Use Ubuntu 18.04 in Docker for maximum compatibility.
 
 ## Naming Conventions
 

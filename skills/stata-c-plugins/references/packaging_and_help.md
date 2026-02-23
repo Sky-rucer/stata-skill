@@ -162,7 +162,7 @@ PLATFORMS = {
     'linux-x86_64': {
         'cc': 'gcc',
         'cflags': '-O3 -fPIC -DSYSTEM=OPUNIX',
-        'ldflags': '-shared',
+        'ldflags': '-shared -static-libstdc++ -static-libgcc',
     },
     'windows-x86_64': {
         'cc': 'x86_64-w64-mingw32-gcc',
@@ -201,6 +201,61 @@ if __name__ == '__main__':
         'myplugin',
         ['algorithm.c', 'stplugin.c'],
     )
+```
+
+## Makefile Template (C++ Plugin)
+
+Alternative to the Python script. Compile `stplugin.c` as C separately per platform.
+
+```makefile
+PLUGIN_NAME = myplugin
+CPP_SOURCES = wrapper.cpp
+CC = gcc
+CXX = g++
+
+TARGET_DARWIN_ARM  = $(PLUGIN_NAME).darwin-arm64.plugin
+TARGET_DARWIN_X86  = $(PLUGIN_NAME).darwin-x86_64.plugin
+TARGET_LINUX       = $(PLUGIN_NAME).linux-x86_64.plugin
+TARGET_WINDOWS     = $(PLUGIN_NAME).windows-x86_64.plugin
+
+.PHONY: all darwin darwin-x86 windows linux all-platforms clean
+
+all: darwin
+
+$(TARGET_DARWIN_ARM): $(CPP_SOURCES) stplugin.c
+	$(CC) -O3 -fPIC -DSYSTEM=APPLEMAC -arch arm64 -c stplugin.c -o stplugin.o
+	$(CXX) -std=c++14 -O3 -fPIC -DSYSTEM=APPLEMAC -arch arm64 -bundle \
+	    -o $@ $(CPP_SOURCES) stplugin.o -lm
+	rm -f stplugin.o
+
+$(TARGET_DARWIN_X86): $(CPP_SOURCES) stplugin.c
+	$(CC) -O3 -fPIC -DSYSTEM=APPLEMAC -target x86_64-apple-macos10.12 -c stplugin.c -o stplugin.o
+	$(CXX) -std=c++14 -O3 -fPIC -DSYSTEM=APPLEMAC -target x86_64-apple-macos10.12 -bundle \
+	    -o $@ $(CPP_SOURCES) stplugin.o -lm
+	rm -f stplugin.o
+
+$(TARGET_LINUX): $(CPP_SOURCES) stplugin.c
+	# Run inside Docker: docker run --rm --platform linux/amd64 -v "$$(pwd):/build" -w /build ubuntu:18.04 \
+	#   bash -c "apt-get update -qq && apt-get install -y -qq g++ gcc make > /dev/null 2>&1 && make linux"
+	gcc -O3 -fPIC -DSYSTEM=OPUNIX -c stplugin.c -o stplugin.o
+	g++ -std=c++14 -O3 -fPIC -DSYSTEM=OPUNIX -shared -static-libstdc++ -static-libgcc \
+	    -o $@ $(CPP_SOURCES) stplugin.o -lm
+	rm -f stplugin.o
+
+$(TARGET_WINDOWS): $(CPP_SOURCES) stplugin.c
+	x86_64-w64-mingw32-gcc -O3 -DSYSTEM=STWIN32 -c stplugin.c -o stplugin.o
+	x86_64-w64-mingw32-g++ -std=c++14 -O3 -DSYSTEM=STWIN32 -shared \
+	    -static-libstdc++ -static-libgcc -o $@ $(CPP_SOURCES) stplugin.o -lm
+	rm -f stplugin.o
+
+darwin: $(TARGET_DARWIN_ARM)
+darwin-x86: $(TARGET_DARWIN_X86)
+linux: $(TARGET_LINUX)
+windows: $(TARGET_WINDOWS)
+all-platforms: darwin darwin-x86 linux windows
+
+clean:
+	rm -f *.plugin stplugin.o
 ```
 
 ## Naming Conventions

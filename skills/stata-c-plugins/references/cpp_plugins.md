@@ -162,10 +162,17 @@ g++ -O3 -std=c++14 -fPIC -DSYSTEM=APPLEMAC -target x86_64-apple-macos10.12 -bund
 ```bash
 gcc -c -O3 -fPIC -DSYSTEM=OPUNIX stplugin.c -o stplugin.o
 g++ -O3 -std=c++14 -fPIC -DSYSTEM=OPUNIX -shared \
+    -static-libstdc++ -static-libgcc \
     -o myplugin.linux-x86_64.plugin wrapper.cpp stplugin.o -lm
 ```
 
+Static linking (`-static-libstdc++ -static-libgcc`) is important for Linux so end users don't need a compatible `libstdc++` installed.
+
+**macOS users:** There is no native Linux cross-compiler on macOS. Run these commands inside a Docker container (see the Docker approach in the main SKILL.md Cross-Platform Compilation section).
+
 ### windows-x86_64 (cross-compile from Mac/Linux)
+
+Install the cross-compiler first: `brew install mingw-w64`.
 
 ```bash
 x86_64-w64-mingw32-gcc -c -O3 -DSYSTEM=STWIN32 stplugin.c -o stplugin.o
@@ -192,9 +199,10 @@ No linking step needed for header-only libraries.
 No difference from C plugins. The output is a single `.plugin` binary per platform, same naming convention (`pluginname.platform.plugin`), same `.ado` wrapper, same `.pkg` distribution.
 
 - Header-only C++ libraries (Eigen, etc.) are compiled into the binary. No runtime dependency.
-- On Windows, use `-static-libstdc++ -static-libgcc` to avoid requiring C++ runtime DLLs.
+- On Windows and Linux, use `-static-libstdc++ -static-libgcc` to avoid requiring C++ runtime DLLs/shared objects.
 - Users cannot tell whether a plugin was written in C or C++. The `.plugin` file is opaque.
 - Same cascade loading pattern, same `net install` distribution.
+- Expected binary sizes: macOS ~200-300K, Linux ~2MB (static C++), Windows ~10-15MB (fully static). These are normal for C++ plugins.
 
 ## Wrapping an Existing C++ Library
 
