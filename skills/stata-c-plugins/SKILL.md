@@ -1,20 +1,21 @@
 ---
 name: stata-c-plugins
 description: >-
-  Develop high-performance C plugins for Stata using the stplugin.h SDK.
-  Use when the user asks to create a Stata plugin, write C code for Stata,
+  Develop high-performance C/C++ plugins for Stata using the stplugin.h SDK.
+  Use when the user asks to create a Stata plugin, write C/C++ code for Stata,
   accelerate a Stata command with C, build cross-platform Stata plugins,
   or translate/port a Python or R package into Stata. Covers the full
   lifecycle: SDK setup, data flow, memory safety, .ado wrappers with
   preserve/merge, cross-platform compilation, performance optimization
   (pthreads, pre-sorted indices, XorShift RNG), debugging, and distribution
   via net install. Also includes a translation workflow for porting Python/R
-  packages to Stata with correlation-based validation.
+  packages to Stata — wrapping existing C++ backends when available, or
+  writing C from scratch when not.
 ---
 
-# Stata C Plugin Development
+# Stata C/C++ Plugin Development
 
-Build high-performance C plugins for Stata. This skill covers the full lifecycle from SDK setup through cross-platform distribution, based on real experience building production plugins (QRF, KNN, Neural Network) for the microimpute_stata project.
+Build high-performance C/C++ plugins for Stata. This skill covers the full lifecycle from SDK setup through cross-platform distribution, based on real experience building production plugins (QRF, KNN, Neural Network) for the microimpute_stata project.
 
 ## When to Use
 
@@ -24,11 +25,13 @@ Build high-performance C plugins for Stata. This skill covers the full lifecycle
 - User needs to compile Stata plugins for multiple platforms
 - User is building a distributable Stata package with compiled code
 - User asks to "translate", "port", or "reimplement" a Python/R package in Stata (see `references/translation_workflow.md`)
+- User wants to wrap an existing C++ library as a Stata plugin (see `references/cpp_plugins.md`)
 
 ## When NOT to Use
 
 - **Pure Stata is fine** for operations that use native commands (`regress`, `qreg`, `matrix`). No plugin needed if Stata already has a command that does what you want.
-- **Plugins are warranted** when you need Python/C-equivalent speed: tree structures, neural nets, custom distance computations, anything with nested loops over observations. If performance matters, go straight to C — don't waste time with Mata as an intermediate step.
+- **Plugins are warranted** when you need Python/C-equivalent speed: tree structures, neural nets, custom distance computations, anything with nested loops over observations. If performance matters, go straight to C/C++ — Mata is significantly slower for compute-heavy work.
+- **When translating a package that has a C++ backend** (many R packages do — check their `src/` directory), **wrap the existing C++ code** rather than reimplementing in C. This gives near-identical output, same performance, and less code to maintain. See `references/translation_workflow.md`.
 
 ## The Plugin SDK
 
@@ -61,10 +64,15 @@ These two files define the interface between your C code and Stata:
 
 ## The stata_call() Entry Point
 
-Every plugin implements one function:
+Every plugin implements one function. **Plugins can also be written in C++** — the entry point just needs `extern "C"` linkage so Stata can find it; everything else can be full C++. The obvious case for C++ is when existing C++ code is available to wrap (e.g., an R package's `src/` directory). C++ also helps when you need complex data structures or threading via `std::thread`. For practical C++ guidance — the `extern "C"` pattern, exception safety, compilation commands, wrapping libraries — see `references/cpp_plugins.md`. The rest of this file focuses on C because it's the simpler default.
 
 ```c
 #include "stplugin.h"
+
+// For C++ plugins, wrap the entry point with extern "C":
+//   extern "C" {
+//     STDLL stata_call(int argc, char *argv[]) { ... }
+//   }
 
 STDLL stata_call(int argc, char *argv[]) {
     // 0. Validate arguments BEFORE accessing argv[]
@@ -234,6 +242,8 @@ Build for four platforms:
 
 All platforms: `-O3 -fPIC` for release, add `-g -fsanitize=address` for development.
 
+**For C++ plugins:** use `g++` instead of `gcc` (or add `-lstdc++` to linker flags). Add `-std=c++11` or later. Header-only C++ libraries like Eigen can be bundled by adding their include path with `-I`.
+
 Naming convention: `pluginname.platform.plugin` (e.g., `qrf_plugin.darwin-arm64.plugin`).
 
 macOS note: use `-bundle`, NOT `-shared`. This is a common mistake.
@@ -247,7 +257,7 @@ See `references/performance_patterns.md` for detailed code examples of:
 1. **Pre-sorted feature indices** — Sort feature values once, scan linearly at each tree node. O(n) per split instead of O(n log n).
 2. **Precomputed distance norms** — Exploit ||a-b||^2 = ||a||^2 + ||b||^2 - 2*a'b for KNN.
 3. **Quickselect** — O(n) partial sort for finding k-th nearest neighbor.
-4. **Parallel ensemble training (pthreads)** — Train multiple models concurrently. Each thread gets its own data copy and RNG state.
+4. **Parallel ensemble training (pthreads)** — Train multiple models concurrently. Each thread gets its own data copy and RNG state. **Never call Stata SDK functions (`SF_vdata`, `SF_vstore`, `SF_display`) from worker threads** — read all data on the main thread first, dispatch computation to workers, write results back on the main thread after joining.
 5. **XorShift RNG** — C plugins cannot access Stata's internal RNG (`runiform()`). XorShift128+ is fast, statistically sound, and thread-safe (each thread gets its own state). Seed from `argv[]` for reproducibility.
 6. **Dense arrays for trees** — Flat node arrays instead of linked lists for cache locality.
 

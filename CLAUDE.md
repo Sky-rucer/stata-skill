@@ -15,6 +15,7 @@ Reference files are loaded on demand:
 - `packaging_and_help.md` — .toc/.pkg/.sthlp templates, build scripts
 - `translation_workflow.md` — scoping source packages, architecture decisions, correlation-based testing
 - `testing_strategy.md` — reference data generation, correctness/integration/stress tests
+- `cpp_plugins.md` — when to use C++ over C, extern "C" pattern, exception safety, compilation, wrapping libraries
 
 ## Repo Structure
 
@@ -29,7 +30,7 @@ skills/
 │   └── packages/        # 20 community package guides
 └── stata-c-plugins/     # C plugin development
     ├── SKILL.md
-    └── references/      # 4 reference files
+    └── references/      # 5 reference files
 ```
 
 ## Conventions

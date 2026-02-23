@@ -7,12 +7,12 @@ Testing a Stata package translated from Python/R requires three things:
 2. **Stata tests** that compare against those references
 3. **Integration tests** that verify the Stata user experience
 
-## Layer 1: Reference Data Generation (Python/R Script)
+## Layer 1: Reference Data Generation
 
 ### Purpose
-Generate test datasets AND reference predictions using the original package. Save everything as CSV so Stata can load it.
+Generate test inputs AND reference outputs using the original package. Save everything as CSV so Stata can load it.
 
-### Script Template: `tests/generate_test_data.py`
+### Script Template: `tests/generate_test_data.py` (or `.R`)
 
 ```python
 #!/usr/bin/env python3
@@ -22,100 +22,77 @@ import numpy as np
 import pandas as pd
 from original_package import OriginalModel
 
-def generate_structured_data(n_train, n_test, n_vars, seed=42):
-    """Generate data with known signal for validation."""
+def generate_test_data(n, p, seed=42):
+    """Generate data with known properties for validation."""
     rng = np.random.default_rng(seed)
+    X = rng.standard_normal((n, p))
 
-    n = n_train + n_test
-    X = rng.standard_normal((n, n_vars))
-
-    # Known coefficients (decaying importance)
-    beta = np.array([3.0 * np.exp(-i / 10) for i in range(n_vars)])
-
-    # Nonlinear signal + noise
+    # Known signal — choose something appropriate for your package
+    beta = np.array([3.0 * np.exp(-i / 10) for i in range(p)])
     y = X @ beta + 0.3 * X[:, 0]**2 + rng.normal(0, 0.5, n)
 
-    return (X[:n_train], y[:n_train],
-            X[n_train:], y[n_train:])
+    return X, y
 
 def generate_validation_data():
-    """Generate validation data with Python reference predictions."""
-    X_train, y_train, X_test, y_test = generate_structured_data(
-        n_train=1000, n_test=200, n_vars=4, seed=42
-    )
+    """Run the source implementation and save inputs + outputs."""
+    X, y = generate_test_data(n=1000, p=4, seed=42)
 
     # Run original implementation
     model = OriginalModel(param1=value1, param2=value2)
-    model.fit(X_train, y_train)
-    pred_python = model.predict(X_test)
+    result = model.fit_or_run(X, y)
 
-    # Build DataFrame for Stata
-    df = pd.DataFrame(X_test, columns=[f'x{i+1}' for i in range(4)])
-    df['y'] = y_test  # ground truth
-    df['pred_python'] = pred_python  # reference prediction
+    # Save inputs and reference outputs as CSV
+    df = pd.DataFrame(X, columns=[f'x{i+1}' for i in range(X.shape[1])])
+    df['y'] = y
 
-    # Also include training data (Stata will need it)
-    df_train = pd.DataFrame(X_train, columns=[f'x{i+1}' for i in range(4)])
-    df_train['y'] = y_train
-    df_train['pred_python'] = np.nan  # no predictions for training data
+    # Save whatever the source produces — predictions, estimates, weights, etc.
+    # The columns you add here depend on what your command outputs.
+    df['ref_output'] = result.predictions  # or .estimates, .weights, etc.
 
-    # Combine: training rows first, then test rows
-    df_all = pd.concat([df_train, df], ignore_index=True)
-    df_all.to_csv('test_method_data.csv', index=False)
-
-    print(f"Validation data: {len(df_train)} train + {len(df)} test")
-    return df_all
-
-def generate_benchmark_data():
-    """Generate multiple sizes for performance benchmarking."""
-    import time
-
-    sizes = [500, 1000, 2000, 5000]
-    for n in sizes:
-        X_train, y_train, X_test, y_test = generate_structured_data(
-            n_train=n, n_test=n//5, n_vars=4, seed=42
-        )
-
-        t0 = time.time()
-        model = OriginalModel()
-        model.fit(X_train, y_train)
-        pred = model.predict(X_test)
-        python_time = time.time() - t0
-
-        # Save data
-        df = pd.DataFrame(
-            np.column_stack([
-                np.concatenate([y_train, y_test]),
-                np.vstack([X_train, X_test])
-            ]),
-            columns=['y'] + [f'x{i+1}' for i in range(4)]
-        )
-        # Append test predictions
-        df['pred_python'] = np.nan
-        df.iloc[n:, -1] = pred
-
-        df.to_csv(f'bench_method_n{n}.csv', index=False)
-        print(f"n={n}: Python time = {python_time:.3f}s")
+    df.to_csv('test_data.csv', index=False)
 
 if __name__ == '__main__':
     generate_validation_data()
-    generate_benchmark_data()
 ```
 
 ### Key Principles
 
-1. **Save complete datasets**, not just predictions. Stata needs X and y to run its own model.
-2. **Include ground truth y** for test observations. This lets you compute correlation with truth, not just with Python.
+1. **Save complete inputs**, not just outputs. Stata needs to run its own implementation on the same data.
+2. **Include ground truth** when applicable, so you can verify both implementations against reality.
 3. **Use structured data** with known signal so you can distinguish implementation bugs from method limitations.
-4. **Record Python timing** so you can compute speedup factors.
-5. **Handle dependency issues gracefully.** Users may not have all Python packages installed. Use try/except and skip gracefully.
+4. **Pin the source package version.** Without this, your reference data may become irreproducible.
 
-## Layer 2: Correctness Tests (Stata)
+## Layer 2: Correctness Tests
+
+### Core Principle
+
+For any input, the Stata implementation should produce the same output as the source. What "same" means depends on the algorithm:
+
+| Algorithm Nature | What to Check | Metric |
+|-----------------|---------------|--------|
+| Deterministic | Exact match | Max absolute deviation < ε (e.g., 1e-10) |
+| Numerically sensitive | Near-exact match | Max relative deviation small; correlation ≈ 1.0 |
+| Fundamentally stochastic | Substantive agreement | Choose a metric appropriate to the output (see below) |
+
+### Choosing the Right Metric
+
+The comparison metric depends on what the command produces:
+
+| Output Type | Appropriate Metrics |
+|-------------|-------------------|
+| Point predictions | Correlation, MAE, max absolute deviation |
+| Scalar estimates (coefficients, SEs) | Relative error, exact match |
+| Classifications / labels | Agreement rate, confusion matrix |
+| Distributions / densities | KS statistic, moment comparisons, QQ correlation |
+| Weights / ranks | Rank correlation (Spearman), weight sum checks |
+| Conditional quantiles | Quantile coverage rates, crossing rates |
+
+Don't default to correlation for everything. It's the right metric for predicted values but meaningless for, say, a single scalar estimate.
 
 ### Script Template: `tests/run_tests.do`
 
 ```stata
-*! run_tests.do - Correctness validation against Python reference
+*! run_tests.do - Correctness validation against reference implementation
 
 clear all
 set more off
@@ -125,46 +102,44 @@ local passed_tests 0
 local failed_tests 0
 
 // ============================================================
-// TEST: Method correctness
+// TEST: Output agrees with reference
 // ============================================================
 
-import delimited using "test_method_data.csv", clear
-
-// Identify training/test split
-gen byte is_test = !missing(pred_python)
-
-// Count
-quietly count if !is_test
-local n_train = r(N)
-quietly count if is_test
-local n_test = r(N)
-
-di "Training: `n_train', Test: `n_test'"
-
-// Set test y to missing (simulating imputation scenario)
-replace y = . if is_test
+import delimited using "test_data.csv", clear
 
 // Run Stata implementation
-packagename y x1 x2 x3 x4, gen(pred_stata) method(method1)
+mycommand y x1 x2 x3 x4, [options]
 
-// Compare: correlation between Stata and Python
-quietly correlate pred_stata pred_python if is_test
-local corr_sp = r(rho)
+// Compare Stata output to reference output
+// Choose comparison appropriate to your output type:
 
-// Compare: correlation between Stata and truth
-// (need to reload y for truth)
-import delimited y using "test_method_data.csv", clear case(preserve)
-// ... or store truth before replacing
+// --- For predictions or continuous output ---
+quietly correlate stata_output ref_output
+local corr = r(rho)
+gen double ad = abs(stata_output - ref_output)
+quietly summarize ad
+local max_dev = r(max)
+local mean_dev = r(mean)
 
 local total_tests = `total_tests' + 1
-if `corr_sp' > 0.98 {
-    di as res "PASS: Method1 correlation = `corr_sp'"
+// Set threshold based on algorithm nature:
+//   deterministic: max_dev < 1e-10
+//   numerically sensitive: corr > 0.999
+//   stochastic: corr > 0.95 (or whatever is appropriate)
+if `corr' > 0.99 {
+    di as res "PASS: correlation = `corr', max dev = `max_dev'"
     local passed_tests = `passed_tests' + 1
 }
 else {
-    di as err "FAIL: Method1 correlation = `corr_sp' (expected > 0.98)"
+    di as err "FAIL: correlation = `corr', max dev = `max_dev'"
     local failed_tests = `failed_tests' + 1
 }
+
+// --- For scalar estimates ---
+// local ref_value = [known value from reference]
+// local stata_value = [r(estimate) or e(b)]
+// local reldiff = abs(`stata_value' - `ref_value') / abs(`ref_value')
+// assert `reldiff' < 1e-6
 
 // ============================================================
 // Summary
@@ -172,25 +147,11 @@ else {
 di _n "Tests: `total_tests', Passed: `passed_tests', Failed: `failed_tests'"
 ```
 
-### Correlation Thresholds by Algorithm Type
+### Always Also Check Against Ground Truth
 
-| Type | Example | Stata vs Python | Rationale |
-|------|---------|-----------------|-----------|
-| Deterministic, exact | KNN with same distance | r = 1.000 | Should match exactly |
-| Deterministic, numerical | OLS, quantile regression | r > 0.999 | Floating point diffs only |
-| Stochastic, same algorithm | QRF (both tree-based) | r > 0.95 | Random splits differ |
-| Stochastic, different impl | NN (C vs sklearn) | r > 0.90 | Training path diverges |
+Matching the source implementation is necessary but not sufficient. If both implementations are wrong in the same way, you'd never know. When ground truth is available (synthetic data with known parameters, held-out test sets), compare against that too.
 
-**Important:** Also check correlation with GROUND TRUTH (not just with Python). A method might match Python perfectly but both be wrong. Correlation with truth validates that the algorithm actually works.
-
-### What to Measure
-
-1. **Correlation** (`correlate pred_stata pred_python`): Overall agreement
-2. **Mean Absolute Deviation** (`gen ad = abs(pred_stata - pred_python)`, `summarize ad`): Scale of disagreement
-3. **Max Absolute Deviation**: Worst-case disagreement
-4. **Exact matches** (for deterministic algorithms): Count where `abs(diff) < 1e-10`
-
-## Layer 3: Integration Tests (Stata)
+## Layer 3: Integration Tests
 
 ### Script Template: `tests/test_features.do`
 
@@ -203,42 +164,43 @@ local n_tests 0
 local n_pass 0
 local n_fail 0
 
-// TEST: Missing data handling (core use case)
+// TEST: Basic invocation works
 sysuse auto, clear
-replace price = . in 1/10
-packagename price mpg weight, gen(price_filled)
-quietly count if missing(price) & !missing(price_filled) in 1/10
-local filled = r(N)
+capture noisily mycommand price mpg weight, [minimal options]
 local n_tests = `n_tests' + 1
-if `filled' == 10 {
-    di as res "PASS: Missing data filled"
+if _rc == 0 {
+    di as res "PASS: basic invocation"
     local n_pass = `n_pass' + 1
 }
 else {
-    di as err "FAIL: Only `filled'/10 missing values filled"
+    di as err "FAIL: basic invocation returned error `=_rc'"
     local n_fail = `n_fail' + 1
 }
 
-// TEST: Each method works
-foreach m in method1 method2 method3 {
+// TEST: Each option/method works
+foreach opt in option1 option2 option3 {
     sysuse auto, clear
-    replace price = . in 1/5
-    capture noisily packagename price mpg weight, gen(p_`m') method(`m')
+    capture noisily mycommand price mpg weight, method(`opt')
     local n_tests = `n_tests' + 1
     if _rc == 0 {
-        di as res "PASS: method(`m') works"
+        di as res "PASS: method(`opt') works"
         local n_pass = `n_pass' + 1
     }
     else {
-        di as err "FAIL: method(`m') returned error `=_rc'"
+        di as err "FAIL: method(`opt') returned error `=_rc'"
         local n_fail = `n_fail' + 1
     }
 }
 
+// TEST: if/in conditions
+sysuse auto, clear
+mycommand price mpg weight if foreign == 1, [options]
+// verify output is only produced for the specified subset
+
 // TEST: replace option
 sysuse auto, clear
-packagename price mpg weight, gen(test_var) method(ols)
-capture noisily packagename price mpg weight, gen(test_var) method(ols) replace
+mycommand price mpg weight, gen(test_var) [options]
+capture noisily mycommand price mpg weight, gen(test_var) [options] replace
 local n_tests = `n_tests' + 1
 if _rc == 0 {
     di as res "PASS: replace option works"
@@ -249,22 +211,17 @@ else {
     local n_fail = `n_fail' + 1
 }
 
-// TEST: if/in conditions
-sysuse auto, clear
-packagename price mpg weight if foreign == 1, gen(p_foreign) method(ols)
-quietly count if !missing(p_foreign) & foreign == 1
-local n_foreign = r(N)
-quietly count if foreign == 1
-local total_foreign = r(N)
-local n_tests = `n_tests' + 1
-if `n_foreign' == `total_foreign' {
-    di as res "PASS: if condition works"
-    local n_pass = `n_pass' + 1
-}
-else {
-    di as err "FAIL: if condition - got `n_foreign'/`total_foreign'"
-    local n_fail = `n_fail' + 1
-}
+// TEST: Stored results
+// After running command, verify r() or e() values are populated
+mycommand price mpg weight, [options]
+assert !missing(r(N))  // or whatever your command stores
+
+// TEST: Edge cases
+// - Single predictor
+// - Many predictors
+// - Small n
+// - Constant variable
+// - All identical values
 
 // Summary
 di _n "Total: `n_tests', Passed: `n_pass', Failed: `n_fail'"
@@ -272,13 +229,13 @@ di _n "Total: `n_tests', Passed: `n_pass', Failed: `n_fail'"
 
 ### What to Test
 
-1. **Missing data handling** — the core use case. Create missing values, impute, verify all filled.
-2. **Every method** — each `method()` option produces output without errors.
-3. **replace option** — calling twice with `replace` doesn't error.
-4. **if/in conditions** — subsetting works correctly.
-5. **Multiple quantiles** — if supported, verify variables are created with correct naming.
-6. **Edge cases** — all missing, no missing, single predictor, many predictors.
-7. **Stored results** — `r()` values are populated correctly after command.
+1. **Basic invocation** — does the command run without error on simple data?
+2. **Every option** — each option/method produces output without errors.
+3. **`if`/`in` conditions** — subsetting works correctly.
+4. **`replace` option** — calling twice with `replace` doesn't error.
+5. **Stored results** — `r()` or `e()` values are populated correctly.
+6. **Edge cases** — small n, high p, constant variables, collinear features.
+7. **Error handling** — bad inputs produce informative error messages, not crashes.
 
 ## Layer 4: Stress Tests
 
@@ -299,25 +256,13 @@ from scipy.stats import multivariate_normal
 rho = 0.5
 cov = np.array([[rho ** abs(i-j) for j in range(p)] for i in range(p)])
 X = multivariate_normal(np.zeros(p), cov).rvs(size=n)
-
-# Exponentially decaying coefficients
-beta = np.array([3.0 * np.exp(-i / 10) for i in range(p)])
-y = X @ beta + 0.3 * X[:, 0]**2 + np.random.normal(0, 0.5, n)
 ```
-
-### Expected Results by Method Type
-
-- **Tree-based (QRF):** Scales well to high dimensions (automatic feature selection)
-- **Distance-based (KNN):** Degrades severely at p > 50 (curse of dimensionality)
-- **Neural network:** Scales well if hidden layer is sized appropriately
-- **Linear (OLS, quantreg):** Scales well but assumes linearity
 
 ## Running Tests
 
 ### Batch Mode
 
 ```bash
-# From the package root directory
 stata-mp -b do tests/run_tests.do
 stata-mp -b do tests/test_features.do
 ```
@@ -331,39 +276,27 @@ grep -E "PASS|FAIL|Total" run_tests.log
 grep -E "PASS|FAIL|Total" test_features.log
 ```
 
-### Platform Detection
-
-macOS reports as "Unix" in Stata's `c(os)`. Handle this:
-```stata
-if "`c(os)'" == "MacOSX" | ("`c(os)'" == "Unix" & "`c(machine_type)'" == "Mac (Apple Silicon)") {
-    local platform "darwin-arm64"
-}
-```
-
-### Log File Management
-
 Add `*.log` to `.gitignore` early. Log files are large and should not be committed.
 
 ## Debugging Test Failures
 
-### Correlation Much Lower Than Expected
+### Output Disagrees with Source
 
 1. **Check data sorting.** Is the plugin receiving data in the order it expects?
-2. **Check missing value handling.** Is `marksample` using `novarlist`?
+2. **Check missing value handling.** Stata `.` vs Python `NaN` vs R `NA` — different semantics.
 3. **Check merge logic.** Does `merge_id` survive preserve/restore?
-4. **Check normalization.** Is the NN plugin receiving scaled data?
-5. **Run the plugin on known simple data** (e.g., y = 2*x + 1) and verify by hand.
+4. **Check normalization.** Are inputs scaled the same way both implementations expect?
+5. **Run on trivially simple data** (e.g., y = 2*x + 1) and verify by hand.
 
 ### Plugin Returns All Missing
 
 1. **Check plugin loading.** Is the correct platform plugin found?
 2. **Check variable count.** Does `SF_nvar()` match what the plugin expects?
 3. **Check argument parsing.** Are `argv[]` values correct?
-4. **Check observation count.** Did `keep if \`touse'` leave zero observations?
+4. **Check observation count.** Did `keep if` leave zero observations?
 
 ### Tests Pass Locally But Fail on Another Platform
 
 1. **Integer sizes differ.** Use `int32_t`/`int64_t` from `<stdint.h>`, not `int`/`long`.
 2. **Floating point order differs.** Stochastic algorithms may produce different results.
 3. **pthreads behavior differs.** Thread scheduling varies by OS.
-4. **Endianness** (rare, but check if sharing binary data).
