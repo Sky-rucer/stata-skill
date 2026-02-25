@@ -17,6 +17,30 @@ description: >-
 
 Build high-performance C/C++ plugins for Stata. This skill covers the full lifecycle from SDK setup through cross-platform distribution, based on real experience building production plugins (QRF, KNN, Neural Network) for the microimpute_stata project.
 
+## How to Approach Every Task
+
+**Before writing any code, enter plan mode.** A good plan covers:
+
+1. **Complete inventory** — every feature, option, and component to build (for translation: exhaustive catalog of the source package's API)
+2. **Architecture decisions** — wrap C++ backend vs. write C from scratch vs. pure Stata
+3. **Relevant reference files** — identify up front which of this skill's reference files contain info you'll need, and cite them explicitly in the plan steps so they get loaded at the right time:
+   - `references/translation_workflow.md` — full translation workflow, test repurposing, fidelity audit
+   - `references/testing_strategy.md` — test layers, reference data generation, Layer 0 (repurpose original tests)
+   - `references/performance_patterns.md` — pthreads, XorShift RNG, quickselect, pre-sorted indices
+   - `references/packaging_and_help.md` — .toc/.pkg/.sthlp templates, build scripts
+   - `references/cpp_plugins.md` — C++ wrapping, extern "C", exception safety, compilation
+4. **Phase-by-phase steps** with dependencies between them
+5. **For each step:** what gets built, what tests get written, and that the review loop runs before proceeding
+6. **For translation projects:** a final fidelity audit as the last step (see `translation_workflow.md`)
+
+**Implement sequentially across components, in parallel within each component.** Once an interface is defined, dispatch independent sub-tasks as parallel subagents (e.g., C plugin implementation, .ado wrapper, and test suite can run simultaneously). Merge their work, run the full test suite, then proceed to the review loop before moving to the next component.
+
+**Run the review loop after every component:**
+- Default: dispatch Claude (`subagent_type=opus-general-agent`) + Codex (`codex-cli-scripting` skill) + Gemini (`gemini-cli-scripting` skill) agents in parallel
+- Fallback (if Codex/Gemini CLI unavailable): dispatch 2-3 Claude subagents with different focuses (correctness, completeness, architecture)
+- Each agent reviews the diff, test results, and requirements — instruction: "List any gaps, bugs, or issues. Say LGTM if everything looks correct."
+- Fix all issues raised, re-dispatch, loop until all agents say LGTM. Then proceed.
+
 ## Wrap First, Write From Scratch Second
 
 **When translating a package, always check for an existing C/C++ backend before writing any algorithm code.** Many R packages have C++ in `src/`. Many Python packages have Cython or vendored C/C++ libraries. Standalone C++ libraries exist for string matching, linear algebra, tree algorithms, and more.
@@ -25,7 +49,7 @@ Build high-performance C/C++ plugins for Stata. This skill covers the full lifec
 
 See `references/cpp_plugins.md` for the full pattern and `references/translation_workflow.md` for the workflow. Working examples: [stata-rapidfuzz](https://github.com/dylantmoore/stata-rapidfuzz) (C++ wrapping), [drf_stata](https://github.com/dylantmoore/drf_stata) (C++ wrapping, R translation), [microimpute_stata](https://github.com/dylantmoore/microimpute_stata) (multi-plugin package), [ranger_stata](https://github.com/dylantmoore/ranger_stata) (C++ wrapping, 4 forest types, save/load).
 
-**Translation workflow requirements:** (1) Always start in plan mode — produce a complete plan before writing code. (2) Repurpose the original package's test suite and test data; also write new tests as needed to ensure fidelity and functionality. (3) Every implementation step uses a multi-agent review loop (default: dispatch Claude + Codex + Gemini reviewers; fallback: 2-3 Claude subagents if other CLIs unavailable; fix issues; re-review until all pass). (4) The plan's final step is a multi-agent fidelity audit verifying every feature/option is implemented and tested; if gaps remain, create a new plan with the same review loop. See `references/translation_workflow.md` for full details.
+For translation projects, also: repurpose the original package's test suite and data (see `references/testing_strategy.md` Layer 0), write additional Stata-specific tests, and end the plan with a multi-agent fidelity audit. See `references/translation_workflow.md` for the complete workflow.
 
 ## The Plugin SDK
 
