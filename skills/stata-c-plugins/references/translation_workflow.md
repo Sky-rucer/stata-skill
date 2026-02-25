@@ -2,6 +2,19 @@
 
 A complete workflow for porting a Python or R statistical package into a native Stata implementation with C plugin acceleration.
 
+## Mandatory: Start in Plan Mode
+
+**Every translation project MUST begin in plan mode.** Before writing any implementation code, produce a complete plan document covering:
+
+1. All features/options of the source package (exhaustive inventory)
+2. Architecture decisions (wrap C++ backend vs. reimplement)
+3. Phase-by-phase implementation order with dependencies
+4. Test strategy (what test data/suites exist in the original package)
+5. The multi-agent review loop baked into every implementation step (see "Multi-Agent Review Loop" below)
+6. A final fidelity audit as the last step (see "Final Fidelity Audit" below)
+
+Use the Plan agent (`subagent_type=Plan`) or enter plan mode to produce this document. The plan must be approved before implementation begins. Every step in the plan should specify what gets built, what gets tested, and that the review loop runs before proceeding.
+
 ## Phase 1: Scope and Understand the Source
 
 Before writing any code, thoroughly understand the source package.
@@ -18,7 +31,17 @@ Before writing any code, thoroughly understand the source package.
 
 6. **Pin the source package version.** Create `requirements.txt` (Python) or record the exact package version (R) so reference test data can be reproduced later. If the source changes, your tests become meaningless.
 
-7. **Map source concepts to Stata equivalents:**
+7. **Repurpose the original package's test suite AND write new tests.** Before writing tests from scratch, examine the source package's existing test suite (`tests/`, `test_*.py`, `testthat/`, etc.). Extract or adapt:
+   - **Test data** — at minimum, use the same datasets the original tests use. Copy them into your `tests/` directory.
+   - **Test cases** — translate the original's test assertions into Stata equivalents. If the original tests check that `predict(model, X)` matches expected values, write the same check in Stata.
+   - **Edge cases** — the original authors already found the tricky inputs. Don't reinvent them.
+   - **Expected outputs** — run the original test suite, capture outputs, and use them as reference data for your Stata tests.
+
+   This is far more valuable than writing tests from scratch because the original authors know where the bugs hide.
+
+   **Then write additional tests** beyond what the original provides. The original test suite may be incomplete, may not cover Stata-specific concerns (preserve/restore, if/in, replace, missing value handling), and doesn't test the .ado wrapper interface. For every implementation step, the agent should write whatever tests are needed to ensure both fidelity (matches the original) and functionality (works correctly as a Stata command). Don't limit yourself to what the original tested — if you see an untested code path, test it.
+
+8. **Map source concepts to Stata equivalents:**
 
    | Python/R Concept | Stata Equivalent |
    |-----------------|-----------------|
@@ -195,6 +218,93 @@ This means if the original package has 15 options, the test suite should exercis
 | All missing output | Wrong variable count, plugin not loaded, zero obs after `keep if` |
 | Platform differences | Integer sizes (`int` vs `int32_t`), thread scheduling |
 
+## Multi-Agent Review Loop
+
+**Every implementation step must pass a multi-agent review before proceeding.** This is not optional — it is baked into every step of the plan. The loop catches bugs, missed edge cases, and architectural issues that a single pass misses.
+
+### The Loop
+
+After completing each step (compile, test, verify no regressions):
+
+1. **Dispatch review agents in parallel.** The default is three agents from different models for maximum diversity:
+   - **Claude agent** (Task tool, `subagent_type=opus-general-agent`): deep code review for correctness, edge cases, architectural issues
+   - **Codex agent** (via `codex-cli-scripting` skill): independent review for gaps, missed requirements, potential bugs
+   - **Gemini agent** (via `gemini-cli-scripting` skill): independent review for completeness, consistency with original package behavior
+
+   **Fallback (Claude-only):** If Codex CLI or Gemini CLI are not available, dispatch 2-3 Claude subagents with different review focuses instead (correctness focus, completeness focus, architecture focus). This provides diversity through different review prompts rather than different models.
+
+   Each agent receives:
+   - The step's requirements (from the plan)
+   - The diffs or full files that were changed
+   - The test results
+   - Instruction: "List any gaps, bugs, or issues. If everything looks correct and complete, say LGTM."
+
+2. **Collect findings.** Read all agents' reports.
+
+3. **If any agent raised issues:** Fix the identified problems, re-compile, re-test, then re-dispatch all review agents. Loop until all agents say LGTM.
+
+4. **If all agents say LGTM:** The step is complete. Proceed to the next step.
+
+### Why Cross-Model Review
+
+Different models catch different things. Claude excels at deep reasoning about edge cases. Codex is strong on code correctness and API contracts. Gemini catches completeness gaps. Using all three provides genuine diversity of perspective — not three copies of the same reviewer. When falling back to Claude-only, different review prompts approximate this diversity.
+
+### Writing Tests During Implementation
+
+Each implementation step should include writing tests for the new functionality — not as an afterthought, but as part of the step itself. The agent should write whatever tests are needed to ensure:
+
+- **Fidelity** — output matches the original package (using repurposed test data where available, new reference data where not)
+- **Functionality** — the feature works correctly as a Stata command (if/in, replace, missing values, error cases)
+- **Edge cases** — boundary conditions, empty inputs, degenerate cases
+- **Regressions** — existing tests continue to pass
+
+If a reviewer identifies an untested code path, writing the test is part of the fix, not a separate task.
+
+### What Reviewers Check
+
+- Correctness: does the code do what the plan says?
+- Edge cases: what happens with empty input, missing values, single-record blocks, etc.?
+- Fidelity: does the behavior match the original package?
+- Test coverage: is the new code tested? Are the tests meaningful (not just "runs without error")? Are there obvious untested paths?
+- Regressions: do all existing tests still pass?
+- Error handling: are failure modes handled gracefully?
+
+## Final Fidelity Audit
+
+**The last step of every plan is a comprehensive fidelity audit.** This is not a casual review — it is a structured, multi-agent investigation of whether the Stata implementation has achieved full feature parity with the original package.
+
+### Audit Process
+
+1. **Dispatch a team of 3 subagents** (default: Claude + Codex + Gemini; fallback: 2-3 Claude agents with different audit focuses). Each agent receives:
+   - The original package's documentation (README, API docs, help pages)
+   - The complete list of features/options from Phase 1 scoping
+   - The Stata implementation's help file and source code
+   - The full test suite and its results
+   - Instruction: "For every feature and option in the original package, verify that (a) it is implemented in the Stata version, (b) it is tested, and (c) the test demonstrates correct behavior. List any features that are missing, untested, or incorrectly implemented. Score the overall fidelity on a 1-10 scale."
+
+2. **Collect and merge findings.** Compile a unified list of gaps from all agents.
+
+3. **If gaps exist:** Create a new plan to close the remaining gaps. The new plan MUST also use the multi-agent review loop for every step, and MUST end with another fidelity audit. This is recursive — keep planning and implementing until the audit passes clean.
+
+4. **If no gaps (or only genuinely impossible features remain):** The translation is complete. Document any intentional omissions in the help file with explanations.
+
+### What the Audit Checks
+
+| Category | Check |
+|----------|-------|
+| Feature coverage | Every function/method in the original has a Stata equivalent |
+| Option coverage | Every parameter/option is exposed and functional |
+| Default values | Stata defaults match original defaults |
+| Edge case handling | Missing data, empty input, boundary conditions match |
+| Error messages | Invalid input produces helpful errors, not crashes |
+| Output format | Stored results (`r()`, variables) contain equivalent information |
+| Documentation | Help file accurately describes all implemented features |
+| Test coverage | Every feature has at least one test; stochastic features have fidelity tests |
+
+### Closing the Loop
+
+The audit-plan-implement-audit cycle continues until the team of reviewers agrees that parity has been achieved. There is no fixed cap on iterations. A typical project might need 1-2 audit rounds after the initial implementation plan completes.
+
 ## Phase 5: Documentation
 
 Be honest about what works, what has limitations, and how it was built. Don't claim features that are silently ignored. Only document what actually works.
@@ -212,16 +322,29 @@ Be honest about what works, what has limitations, and how it was built. Don't cl
 ## Workflow Summary
 
 ```
-1. Read and understand source package — catalog ALL features, options, and modes
-2. Check for C/C++ backend (R: check src/, Python: check for Cython/C extensions)
-3. Check license compatibility
-4. Map ALL functions/options → Stata commands, identify compute-heavy algorithms
-5. Decide: wrap C++ backend, write C/C++ from scratch, or pure Stata for each algorithm
-6. Plan ALL features upfront — flag difficulties but do not defer by default
-7. Scaffold: .ado dispatcher, method wrappers, .sthlp, .pkg, .toc
-8. Implement plugins with ALL features — wrap existing C++ or write C/C++
-9. Write reference data generator in source language covering ALL features with pinned dependencies
-10. Write Stata test suite: every feature tested for both functionality AND fidelity to source
-11. Debug until outputs agree (identical, nearly identical, or substantively identical depending on algorithm)
-12. Write honest README, package, distribute via net install
+ 1. START IN PLAN MODE — produce a complete plan document before writing any code
+ 2. Read and understand source package — catalog ALL features, options, and modes
+ 3. Repurpose original test suite — extract test data, cases, and expected outputs
+ 4. Check for C/C++ backend (R: check src/, Python: check for Cython/C extensions)
+ 5. Check license compatibility
+ 6. Map ALL functions/options → Stata commands, identify compute-heavy algorithms
+ 7. Decide: wrap C++ backend, write C/C++ from scratch, or pure Stata
+ 8. Plan ALL features upfront — flag difficulties but do not defer by default
+ 9. Bake multi-agent review loop into every plan step
+10. Scaffold: .ado dispatcher, method wrappers, .sthlp, .pkg, .toc
+11. For each implementation step:
+      a. Implement the feature
+      b. Write tests for fidelity and functionality (don't skip this)
+      c. Compile and run full test suite
+      d. Dispatch review agents (default: Claude + Codex + Gemini; fallback: 2-3 Claude agents)
+      e. Fix any issues raised by reviewers (including writing missing tests)
+      f. Re-review until all agents say LGTM
+      g. Proceed to next step
+12. Write reference data generator covering ALL features with pinned dependencies
+13. Write Stata test suite: every feature tested for both functionality AND fidelity
+14. Debug until outputs agree with original package
+15. FINAL FIDELITY AUDIT — dispatch multi-agent team to verify full feature parity
+16. If gaps found: create new plan (with review loop), implement, re-audit
+17. Repeat until audit passes clean
+18. Write honest README, package, distribute via net install
 ```

@@ -7,6 +7,40 @@ Testing a Stata package translated from Python/R requires three things:
 2. **Stata tests** that compare against those references
 3. **Integration tests** that verify the Stata user experience
 
+## Layer 0: Repurpose the Original Test Suite
+
+### Purpose
+Before writing any new tests, mine the original package's test suite for test data, test cases, and expected outputs. The original authors already found the edge cases and tricky inputs — don't reinvent them.
+
+### What to Extract
+
+1. **Test datasets.** Copy or convert the original's test data into CSV for Stata. These are the most valuable artifacts — they represent inputs the original authors specifically chose to exercise edge cases.
+
+2. **Test assertions.** Translate the original's test checks into Stata. If the Python test says `assert model.predict(X) == expected`, write the equivalent Stata assertion.
+
+3. **Edge case inputs.** Look for tests that exercise boundary conditions: empty input, single records, all-identical values, missing data patterns, maximum-size inputs. These are the tests you'd otherwise have to discover through painful debugging.
+
+4. **Expected outputs.** Run the original test suite and capture its outputs. Use these as reference data for your Stata fidelity tests.
+
+### How to Extract
+
+```bash
+# Find the original's test files
+find /path/to/source/package -name "test_*.py" -o -name "tests/" -o -name "testthat/"
+
+# For Python: run tests and capture output
+cd /path/to/source/package && python -m pytest tests/ -v --tb=short
+
+# For R: run tests
+cd /path/to/source/package && Rscript -e "testthat::test_dir('tests/')"
+```
+
+Generate a script that runs the original test suite, captures all inputs and expected outputs as CSV, and saves them in your Stata project's `tests/` directory. Pin the exact package version so results are reproducible.
+
+### When the Original Has No Test Suite
+
+Some packages have minimal or no tests. In this case, fall back to Layer 1 (generating reference data from scratch). But first check: documentation examples, vignettes, and README demos often contain implicit test cases with expected outputs.
+
 ## Layer 1: Reference Data Generation
 
 ### Purpose

@@ -25,6 +25,8 @@ Build high-performance C/C++ plugins for Stata. This skill covers the full lifec
 
 See `references/cpp_plugins.md` for the full pattern and `references/translation_workflow.md` for the workflow. Working examples: [stata-rapidfuzz](https://github.com/dylantmoore/stata-rapidfuzz) (C++ wrapping), [drf_stata](https://github.com/dylantmoore/drf_stata) (C++ wrapping, R translation), [microimpute_stata](https://github.com/dylantmoore/microimpute_stata) (multi-plugin package), [ranger_stata](https://github.com/dylantmoore/ranger_stata) (C++ wrapping, 4 forest types, save/load).
 
+**Translation workflow requirements:** (1) Always start in plan mode — produce a complete plan before writing code. (2) Repurpose the original package's test suite and test data; also write new tests as needed to ensure fidelity and functionality. (3) Every implementation step uses a multi-agent review loop (default: dispatch Claude + Codex + Gemini reviewers; fallback: 2-3 Claude subagents if other CLIs unavailable; fix issues; re-review until all pass). (4) The plan's final step is a multi-agent fidelity audit verifying every feature/option is implemented and tested; if gaps remain, create a new plan with the same review loop. See `references/translation_workflow.md` for full details.
+
 ## The Plugin SDK
 
 Download `stplugin.h` and `stplugin.c` from: https://www.stata.com/plugins/
