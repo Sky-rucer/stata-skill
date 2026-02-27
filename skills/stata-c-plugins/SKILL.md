@@ -234,48 +234,50 @@ Document which pattern your plugin uses.
 
 ### Plugin Loading (Cross-Platform)
 
-**Use `findfile` to locate the plugin binary.** Bare filenames in `using()` do not search Stata's adopath subdirectories (e.g., `plus/g/` where `net install` places files). This causes "plugin not found" errors even when the file is correctly installed. The `findfile` command searches the full adopath and returns the absolute path.
+Use the **gtools-style OS detection pattern**. This detects the OS via `c(os)` and constructs a bare filename. The bare filename is resolved via Stata's adopath, which is reliable across all platforms.
 
 ```stata
-local plugin_loaded 0
-foreach plat in darwin-arm64 darwin-x86_64 linux-x86_64 windows-x86_64 {
-    if !`plugin_loaded' {
-        capture findfile myplugin.`plat'.plugin
-        if _rc == 0 {
-            capture program myplugin, plugin using("`r(fn)'")
-            if _rc == 0 | _rc == 110 {
-                local plugin_loaded 1
-            }
-        }
-    }
-}
-if !`plugin_loaded' {
-    display as error "could not load myplugin"
-    display as error "make sure the .plugin file is installed"
-    exit 601
-}
+/* ---- Load plugin (gtools-style: detect OS, bare filename) ---- */
+if ( inlist("`c(os)'", "MacOSX") | strpos("`c(machine_type)'", "Mac") ) local c_os_ macosx
+else local c_os_: di lower("`c(os)'")
+
+cap program drop myplugin
+program myplugin, plugin using("myplugin_`c_os_'.plugin")
 ```
 
-`_rc == 110` means "already loaded" — that's fine, the plugin is ready to use.
+This resolves to `myplugin_macosx.plugin`, `myplugin_windows.plugin`, or `myplugin_unix.plugin` depending on platform.
+
+**WARNING — DO NOT use `findfile` + absolute paths.** The following pattern is BROKEN on Windows and must never be used:
+
+```stata
+* BROKEN — DO NOT USE
+capture findfile myplugin.plugin
+capture program myplugin, plugin using("`r(fn)'")
+```
+
+`findfile` returns an absolute path (e.g., `C:\ado\plus\m\myplugin.plugin`). On Windows, Stata's `LoadLibrary` call fails when given certain absolute paths via `using()`. The gtools-style pattern avoids this by passing a **bare filename** (no path), which Stata resolves via the adopath — exactly how gtools, ftools, and other major packages work.
+
+Similarly, **do not use a nested if/else cascade** trying each `platform-arch` suffix. This was the old pattern in several packages and fails for the same reason if `findfile` is involved, plus it's fragile and verbose.
+
+**Plugin file naming:** `pluginname_os.plugin` where `os` is one of `macosx`, `unix`, `windows`. Examples: `qrf_plugin_macosx.plugin`, `grf_plugin_windows.plugin`.
 
 **Note:** `clear all` wipes loaded plugin definitions. If a test script starts with `clear all`, all `program ... plugin` definitions are gone. Reload them.
 
 ## Cross-Platform Compilation
 
-Build for four platforms. Install the Windows cross-compiler first: `brew install mingw-w64`.
+Build for three platforms (ARM Macs run x86_64 via Rosetta, so one macOS binary suffices). Install the Windows cross-compiler first: `brew install mingw-w64`.
 
-| Platform | Compiler | `-D` flag | Link flag | pthreads |
-|----------|----------|-----------|-----------|----------|
-| darwin-arm64 | `gcc -arch arm64` | `-DSYSTEM=APPLEMAC` | `-bundle` | `-pthread` |
-| darwin-x86_64 | `gcc -target x86_64-apple-macos10.12` | `-DSYSTEM=APPLEMAC` | `-bundle` | `-pthread` |
-| linux-x86_64 | `gcc` | `-DSYSTEM=OPUNIX` | `-shared` | `-pthread` |
-| windows-x86_64 | `x86_64-w64-mingw32-gcc` | `-DSYSTEM=STWIN32` | `-shared` | `-lwinpthread` |
+| Target OS | Output name suffix | Compiler | `-D` flag | Link flag | pthreads |
+|-----------|-------------------|----------|-----------|-----------|----------|
+| macOS (ARM64) | `_macosx` | `gcc -arch arm64` | `-DSYSTEM=APPLEMAC` | `-bundle` | `-pthread` |
+| Linux (x86_64) | `_unix` | `gcc` | `-DSYSTEM=OPUNIX` | `-shared` | `-pthread` |
+| Windows (x86_64) | `_windows` | `x86_64-w64-mingw32-gcc` | `-DSYSTEM=STWIN32` | `-shared` | `-lwinpthread` |
 
 All platforms: `-O3 -fPIC` for release, add `-g -fsanitize=address` for development.
 
 **For C++ plugins:** use `g++` instead of `gcc`. Add `-std=c++` at the version the library requires (check its docs — C++11, C++14, and C++17 are all common). Header-only C++ libraries can be vendored into `c_source/` and included with `-I.`. Always use `-static-libstdc++ -static-libgcc` on Windows and Linux.
 
-Naming convention: `pluginname.platform.plugin` (e.g., `qrf_plugin.darwin-arm64.plugin`).
+Naming convention: `pluginname_os.plugin` (e.g., `qrf_plugin_macosx.plugin`, `grf_plugin_windows.plugin`). The `os` suffix must match what the gtools-style loader produces: `macosx`, `unix`, or `windows`.
 
 macOS note: use `-bundle`, NOT `-shared`. This is a common mistake.
 
@@ -345,16 +347,19 @@ Debugging is hard because you can't attach a debugger to Stata's plugin host.
 mypackage/
 ├── stata.toc                          # lists all package variants
 ├── mypackage.pkg                      # all platforms (for users who don't care)
-├── mypackage_mac.pkg                  # macOS only (ARM64 + Intel)
-├── mypackage_linux.pkg                # Linux only (x86_64)
-├── mypackage_win.pkg                  # Windows only (x86_64)
+├── mypackage_mac.pkg                  # macOS only
+├── mypackage_linux.pkg                # Linux only
+├── mypackage_win.pkg                  # Windows only
 ├── mycommand.sthlp                    # overview help file (short name!)
 ├── mycommand.ado                      # user-facing command
-├── myplugin.darwin-arm64.plugin
-├── myplugin.darwin-x86_64.plugin
-├── myplugin.linux-x86_64.plugin
-├── myplugin.windows-x86_64.plugin
+├── myplugin_macosx.plugin
+├── myplugin_unix.plugin
+├── myplugin_windows.plugin
 └── c_source/                          # NOT distributed, for building
+    ├── build.py
+    ├── stplugin.c
+    ├── stplugin.h
+    └── algorithm.c
 ```
 
 Users install their platform's package:
@@ -367,6 +372,8 @@ net install mypackage_linux, from("https://raw.githubusercontent.com/user/repo/m
 net install mypackage_win, from("https://raw.githubusercontent.com/user/repo/main") replace
 ```
 
+All platform binaries ship via the all-platform .pkg, or users can install platform-specific packages. Stata loads only the matching plugin at runtime via gtools-style OS detection. Windows C++ binaries can be 10-15MB due to static linking, which is normal.
+
 See `references/packaging_and_help.md` for `.toc`, `.pkg`, `.sthlp` templates and SMCL formatting.
 
 ## Common Pitfalls
@@ -377,7 +384,7 @@ See `references/packaging_and_help.md` for `.toc`, `.pkg`, `.sthlp` templates an
 
 3. **`marksample` excludes missing by default.** For imputation (where missing depvar IS the point), use `marksample touse, novarlist`.
 
-4. **macOS reports as "Unix" in `c(os)`.** Platform detection needs: `if "`c(os)'" == "MacOSX" | "`c(os)'" == "Unix"`.
+4. **macOS `c(os)` returns "MacOSX".** Use the gtools pattern: `inlist("`c(os)'", "MacOSX") | strpos("`c(machine_type)'", "Mac")` to detect Mac. For other platforms, `lower(c(os))` gives `"windows"` or `"unix"`.
 
 5. **argv[] has no bounds checking.** Accessing `argv[3]` when `argc == 2` is a segfault. Always check `argc` first.
 
@@ -395,14 +402,14 @@ See `references/packaging_and_help.md` for `.toc`, `.pkg`, `.sthlp` templates an
 
 12. **`SF_nvar()` returns total dataset variables.** It counts ALL variables in the dataset, not just the ones in the `plugin call` varlist. If the .ado creates tempvars (`touse`, `merge_id`, sort keys), the count will be higher than expected. Never use `SF_nvar()` to validate argument counts — pass the expected count via `argv` instead.
 
-13. **Plugin loading with bare `using()` fails after `net install`.** `net install` places files in adopath letter-subdirectories (e.g., `plus/g/`). Bare filenames in `program ... plugin using("file.plugin")` don't search these subdirectories. Always use `findfile` to get the absolute path first (see Plugin Loading section above).
+13. **`findfile` + absolute paths breaks on Windows.** `findfile` returns an absolute path that Stata's `LoadLibrary` can't resolve on Windows. Use the gtools-style OS detection pattern instead (see Plugin Loading section above) — it constructs a bare filename that Stata resolves via the adopath.
 
 ## Naming Conventions
 
 - Use `method()` not `model()` for method selection options
 - Use `generate()` (abbreviation `gen()`) for output variable naming
 - Use `replace` as a flag option, not `replace()`
-- Plugin files: `algorithm_plugin.platform.plugin`
+- Plugin files: `algorithm_plugin_os.plugin` where os is `macosx`, `unix`, or `windows`
 - .ado files: lowercase, underscores for multi-word
 - Stata option convention: options lowercase, abbreviations capitalized (`GENerate`, `MAXDepth`)
 - Target Stata 14.0+ (`version 14.0`) for plugin support

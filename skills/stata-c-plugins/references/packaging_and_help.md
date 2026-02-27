@@ -39,8 +39,7 @@ f mycommand.ado
 f mycommand.sthlp
 f mycommand_sub.ado
 f mycommand_sub.sthlp
-f myplugin.darwin-arm64.plugin
-f myplugin.darwin-x86_64.plugin
+f myplugin_macosx.plugin
 ```
 
 **packagename_linux.pkg** (Linux x86_64):
@@ -57,7 +56,7 @@ f mycommand.ado
 f mycommand.sthlp
 f mycommand_sub.ado
 f mycommand_sub.sthlp
-f myplugin.linux-x86_64.plugin
+f myplugin_unix.plugin
 ```
 
 **packagename_win.pkg** (Windows x86_64):
@@ -74,7 +73,7 @@ f mycommand.ado
 f mycommand.sthlp
 f mycommand_sub.ado
 f mycommand_sub.sthlp
-f myplugin.windows-x86_64.plugin
+f myplugin_windows.plugin
 ```
 
 **packagename.pkg** (all platforms — for users who don't care about download size):
@@ -91,15 +90,15 @@ f mycommand.ado
 f mycommand.sthlp
 f mycommand_sub.ado
 f mycommand_sub.sthlp
-f myplugin.darwin-arm64.plugin
-f myplugin.darwin-x86_64.plugin
-f myplugin.linux-x86_64.plugin
-f myplugin.windows-x86_64.plugin
+f myplugin_macosx.plugin
+f myplugin_unix.plugin
+f myplugin_windows.plugin
 ```
 
 - `f` lines list every file to install
 - Files install to the user's PLUS ado directory in a letter-subdirectory (e.g., `plus/g/`)
 - Only list `.plugin` files that actually exist — listing a nonexistent file fails the install
+- Stata loads the right plugin at runtime via gtools-style OS detection
 
 ### Installation Commands
 
@@ -116,31 +115,20 @@ net install packagename, from("https://raw.githubusercontent.com/user/repo/main"
 
 The `from()` URL must point to a directory containing `stata.toc`. The repo must be **public** — private repos return 404 from `raw.githubusercontent.com`.
 
-### Plugin Loading (findfile)
+### Plugin Loading (gtools-style)
 
-**Always use `findfile` to locate plugin binaries.** After `net install`, plugins live in adopath letter-subdirectories (e.g., `plus/g/`). Bare filenames in `using()` don't search these paths. Use `findfile` to get the absolute path:
+Use the **gtools-style OS detection pattern** in every .ado that calls the plugin. This detects the OS and constructs a bare filename that Stata resolves via the adopath:
 
 ```stata
-local plugin_loaded 0
-foreach plat in darwin-arm64 darwin-x86_64 linux-x86_64 windows-x86_64 {
-    if !`plugin_loaded' {
-        capture findfile myplugin.`plat'.plugin
-        if _rc == 0 {
-            capture program myplugin, plugin using("`r(fn)'")
-            if _rc == 0 | _rc == 110 {
-                local plugin_loaded 1
-            }
-        }
-    }
-}
-if !`plugin_loaded' {
-    display as error "could not load myplugin"
-    display as error "make sure the .plugin file is installed"
-    exit 601
-}
+/* ---- Load plugin (gtools-style: detect OS, bare filename) ---- */
+if ( inlist("`c(os)'", "MacOSX") | strpos("`c(machine_type)'", "Mac") ) local c_os_ macosx
+else local c_os_: di lower("`c(os)'")
+
+cap program drop myplugin
+program myplugin, plugin using("myplugin_`c_os_'.plugin")
 ```
 
-`_rc == 110` means "already loaded" — that's fine.
+**WARNING — DO NOT use `findfile` + absolute paths.** `findfile` returns absolute paths that fail with Stata's `LoadLibrary` on Windows. The gtools-style bare filename pattern is proven reliable across all platforms.
 
 ## Help File Naming
 
@@ -250,22 +238,17 @@ import subprocess
 import sys
 
 PLATFORMS = {
-    'darwin-arm64': {
+    'macosx': {
         'cc': 'gcc',
         'cflags': '-O3 -fPIC -DSYSTEM=APPLEMAC -arch arm64',
         'ldflags': '-bundle -arch arm64',
     },
-    'darwin-x86_64': {
-        'cc': 'gcc',
-        'cflags': '-O3 -fPIC -DSYSTEM=APPLEMAC -target x86_64-apple-macos10.12',
-        'ldflags': '-bundle -target x86_64-apple-macos10.12',
-    },
-    'linux-x86_64': {
+    'unix': {
         'cc': 'gcc',
         'cflags': '-O3 -fPIC -DSYSTEM=OPUNIX',
         'ldflags': '-shared -static-libstdc++ -static-libgcc',
     },
-    'windows-x86_64': {
+    'windows': {
         'cc': 'x86_64-w64-mingw32-gcc',
         'cflags': '-O3 -DSYSTEM=STWIN32',
         'ldflags': '-shared',
@@ -279,13 +262,13 @@ def build_plugin(name, sources, platforms=None):
 
     for platform in platforms:
         cfg = PLATFORMS[platform]
-        output = f"{name}.{platform}.plugin"
+        output = f"{name}_{platform}.plugin"
         cmd = (
             f"{cfg['cc']} {cfg['cflags']} {cfg['ldflags']} "
             f"-o {output} {' '.join(sources)}"
         )
         # Add pthreads
-        if 'win' in platform:
+        if platform == 'windows':
             cmd += " -lwinpthread"
         else:
             cmd += " -pthread"
@@ -314,28 +297,21 @@ CPP_SOURCES = wrapper.cpp
 CC = gcc
 CXX = g++
 
-TARGET_DARWIN_ARM  = $(PLUGIN_NAME).darwin-arm64.plugin
-TARGET_DARWIN_X86  = $(PLUGIN_NAME).darwin-x86_64.plugin
-TARGET_LINUX       = $(PLUGIN_NAME).linux-x86_64.plugin
-TARGET_WINDOWS     = $(PLUGIN_NAME).windows-x86_64.plugin
+TARGET_MACOSX  = $(PLUGIN_NAME)_macosx.plugin
+TARGET_UNIX    = $(PLUGIN_NAME)_unix.plugin
+TARGET_WINDOWS = $(PLUGIN_NAME)_windows.plugin
 
-.PHONY: all darwin darwin-x86 windows linux all-platforms clean
+.PHONY: all macosx windows linux all-platforms clean
 
-all: darwin
+all: macosx
 
-$(TARGET_DARWIN_ARM): $(CPP_SOURCES) stplugin.c
+$(TARGET_MACOSX): $(CPP_SOURCES) stplugin.c
 	$(CC) -O3 -fPIC -DSYSTEM=APPLEMAC -arch arm64 -c stplugin.c -o stplugin.o
 	$(CXX) -std=c++14 -O3 -fPIC -DSYSTEM=APPLEMAC -arch arm64 -bundle \
 	    -o $@ $(CPP_SOURCES) stplugin.o -lm
 	rm -f stplugin.o
 
-$(TARGET_DARWIN_X86): $(CPP_SOURCES) stplugin.c
-	$(CC) -O3 -fPIC -DSYSTEM=APPLEMAC -target x86_64-apple-macos10.12 -c stplugin.c -o stplugin.o
-	$(CXX) -std=c++14 -O3 -fPIC -DSYSTEM=APPLEMAC -target x86_64-apple-macos10.12 -bundle \
-	    -o $@ $(CPP_SOURCES) stplugin.o -lm
-	rm -f stplugin.o
-
-$(TARGET_LINUX): $(CPP_SOURCES) stplugin.c
+$(TARGET_UNIX): $(CPP_SOURCES) stplugin.c
 	# Run inside Docker: docker run --rm --platform linux/amd64 -v "$$(pwd):/build" -w /build ubuntu:18.04 \
 	#   bash -c "apt-get update -qq && apt-get install -y -qq g++ gcc make > /dev/null 2>&1 && make linux"
 	gcc -O3 -fPIC -DSYSTEM=OPUNIX -c stplugin.c -o stplugin.o
@@ -349,11 +325,10 @@ $(TARGET_WINDOWS): $(CPP_SOURCES) stplugin.c
 	    -static-libstdc++ -static-libgcc -o $@ $(CPP_SOURCES) stplugin.o -lm
 	rm -f stplugin.o
 
-darwin: $(TARGET_DARWIN_ARM)
-darwin-x86: $(TARGET_DARWIN_X86)
-linux: $(TARGET_LINUX)
+macosx: $(TARGET_MACOSX)
+linux: $(TARGET_UNIX)
 windows: $(TARGET_WINDOWS)
-all-platforms: darwin darwin-x86 linux windows
+all-platforms: macosx linux windows
 
 clean:
 	rm -f *.plugin stplugin.o
@@ -364,7 +339,7 @@ clean:
 - Use `method()` not `model()` for method selection options
 - Use `generate()` (abbreviation `gen()`) for output variable naming
 - Use `replace` as a flag option, not `replace()`
-- Plugin files: `algorithm_plugin.platform.plugin`
+- Plugin files: `algorithm_plugin_os.plugin` where os is `macosx`, `unix`, or `windows`
 - .ado files: lowercase, underscores for multi-word commands
 - Stata convention: options use lowercase, abbreviations capitalized (`GENerate`, `MAXDepth`)
 - Target Stata 14.0+ for plugin support (`version 14.0`)
