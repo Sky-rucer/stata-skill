@@ -1,4 +1,4 @@
-*! version 1.0.0  26feb2026
+*! version 4.1.0  28feb2026
 *! Cluster-level evaluation metrics for record linkage
 *! Computes purity, completeness, and cluster F1 from true entity labels
 
@@ -6,6 +6,8 @@ program define splink_cluster_metrics, rclass
     version 14.0
 
     syntax, PREDicted(varname) TRUE(varname)
+
+    preserve
 
     * Compute cluster purity: fraction of dominant true entity per predicted cluster
     quietly {
@@ -57,8 +59,7 @@ program define splink_cluster_metrics, rclass
         local n_true_clusters = r(N)
     }
 
-    * Clean up
-    quietly drop _n_pair _first _n_pair_rev _first_true
+    restore
 
     * Display
     display as text ""

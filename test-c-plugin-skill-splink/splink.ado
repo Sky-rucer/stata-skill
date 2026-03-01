@@ -1,4 +1,4 @@
-*! version 3.1.0  26feb2026
+*! version 4.0.0  27feb2026
 *! Probabilistic record linkage using the Fellegi-Sunter model
 *! Full-fidelity implementation matching the Python splink v4 package
 *! Supports: configurable comparison levels, multiple comparison functions,
@@ -14,9 +14,15 @@ program define splink, rclass
     * Check if first token is a known subcommand
     local subcmd ""
     gettoken first rest : 0
-    if "`first'" == "train" | "`first'" == "predict" | "`first'" == "cluster" {
+    if "`first'" == "train" | "`first'" == "predict" {
         local subcmd "`first'"
         local 0 "`rest'"
+    }
+    else if "`first'" == "cluster" {
+        display as error "splink cluster: not a valid subcommand"
+        display as error "  clustering is part of the default pipeline"
+        display as error "  use: splink varlist, block(...) gen(...)"
+        exit 198
     }
 
     syntax varlist(min=1) [if] [in],           ///
@@ -31,13 +37,19 @@ program define splink, rclass
          COMPare(string)                        ///  extended comparison spec
          TFadjust(varlist)                      ///  term frequency adjustment variables
          TFmin(real 0.001)                      ///  minimum TF u-value
+         TFWeight(string)                       ///  TF blending weight per TF var (0-1)
+         TFSource(varlist)                      ///  source vars for TF computation
+         TFExactonly                            ///  apply TF only to exact-match level
          PRior(real 0.0001)                     ///  prior match probability
          THReshold(real 0.85)                   ///  match probability threshold
+         CLUSTERThreshold(real -1)              ///  separate clustering threshold
+         WEIGHTThreshold(real -999)             ///  match weight (log2 BF) threshold
          MAXIter(integer 25)                    ///  max EM iterations
          MAXBlocksize(integer 5000)             ///  max records per block (0=no limit)
          LINKvar(varname)                       ///  source indicator for linking
          LINKType(string)                       ///  "dedupe" "link" "link_and_dedupe"
          NULLweight(string)                     ///  "neutral" (default) or "penalize"
+         NULLMode(string)                       ///  per-var null mode: "neutral penalize"
          SAVEPairs(string)                      ///  file path for pairwise output
          Mprob(string)                          ///  fixed m-probs: "0.9,0.05,0.03,0.02|..."
          Uprob(string)                          ///  fixed u-probs: "0.01,0.02,0.12,0.85|..."
@@ -48,11 +60,22 @@ program define splink, rclass
          SAVEModel(string)                      ///  save model parameters to JSON
          LOADModel(string)                      ///  load model parameters from JSON
          MODE(string)                           ///  "legacy" "train" "score"
+         RECall(real 1.0)                       ///  recall for lambda estimation
+         FIXLambda                              ///  prevent EM from updating lambda
+         EMNoTF                                 ///  EM without term frequency adjustments
+         CLUSTERMethod(string)                  ///  "cc" or "bestlink"
+         SALT(integer 0)                        ///  blocking salting partitions
+         EMTol(real 0.00001)                     ///  EM convergence tolerance
+         ROUNDRobin                             ///  round-robin EM across blocking rules
+         MLabel(varname)                        ///  label column for supervised m-estimation
+         FIXMlevels(string)                     ///  per-level m fixing: "1:0,1|3:0,2"
+         FIXUlevels(string)                     ///  per-level u fixing: "1:0,1|3:0,2"
+         TIMEUnit(string)                       ///  time unit for abs_time: seconds minutes hours days
          REPlace                                ///  replace existing output variable
          Verbose]
 
     * --- Validate inputs ---
-    if `threshold' <= 0 | `threshold' >= 1 {
+    if `threshold' <= 0 | `threshold' > 1 {
         display as error "threshold() must be between 0 and 1"
         exit 198
     }
@@ -64,10 +87,37 @@ program define splink, rclass
         display as error "prior() must be between 0 and 1"
         exit 198
     }
+    if `recall' <= 0 | `recall' > 1 {
+        display as error "recall() must be between 0 and 1"
+        exit 198
+    }
+    if `clusterthreshold' != -1 & (`clusterthreshold' <= 0 | `clusterthreshold' >= 1) {
+        display as error "clusterthreshold() must be between 0 and 1"
+        exit 198
+    }
+    if `salt' < 0 {
+        display as error "salt() must be >= 0"
+        exit 198
+    }
+    * Validate cluster method
+    local cluster_method_code = 0
+    if "`clustermethod'" != "" {
+        if "`clustermethod'" == "cc" | "`clustermethod'" == "connected" {
+            local cluster_method_code = 0
+        }
+        else if "`clustermethod'" == "bestlink" | "`clustermethod'" == "best_link" {
+            local cluster_method_code = 1
+        }
+        else {
+            display as error "clustermethod() must be: cc or bestlink"
+            exit 198
+        }
+    }
 
     * --- Load model (if specified) ---
     * Must happen before config writing so we can inject mprob/uprob/prior
     if `"`loadmodel'"' != "" {
+        confirm file `"`loadmodel'"'
         local n_comp_tmp : word count `varlist'
         _splink_load_model "`loadmodel'" `n_comp_tmp'
         local mprob "`r(mprob)'"
@@ -75,7 +125,6 @@ program define splink, rclass
         local prior = r(lambda)
         * Force score mode
         local subcmd ""
-        local mode_code = 2
     }
 
     * Handle replace
@@ -87,6 +136,12 @@ program define splink, rclass
     * --- Comparison variables ---
     local compvars `varlist'
     local n_comp : word count `compvars'
+
+    * Bounds check: max 20 comparison variables (C plugin limit)
+    if `n_comp' > 20 {
+        display as error "too many comparison variables (`n_comp'); maximum is 20"
+        exit 198
+    }
 
     * --- Parse compare() option (overrides compvars/compmethod/complevels) ---
     if `"`compare'"' != "" {
@@ -236,7 +291,7 @@ program define splink, rclass
     * Convert method names to integer codes
     * 0=jw, 1=jaro, 2=lev, 3=dl, 4=jaccard, 5=exact, 6=numeric
     * 7=dob, 8=email, 9=postcode, 10=nameswap, 11=name
-    * 12=abs_date, 13=distance, 14=cosine, 15=custom
+    * 12=abs_date, 13=distance, 14=cosine, 15=custom, 18=abs_time
     local method_codes ""
     forvalues i = 1/`n_comp' {
         local m : word `i' of `comp_methods'
@@ -286,12 +341,21 @@ program define splink, rclass
         else if "`m'" == "cosine" {
             local method_codes "`method_codes' 14"
         }
+        else if "`m'" == "pctdiff" | "`m'" == "pct_diff" | "`m'" == "percentagedifference" {
+            local method_codes "`method_codes' 16"
+        }
+        else if "`m'" == "intersect" | "`m'" == "array_intersect" {
+            local method_codes "`method_codes' 17"
+        }
         else if "`m'" == "custom" {
             local method_codes "`method_codes' 15"
         }
+        else if "`m'" == "abs_time" | "`m'" == "abstime" | "`m'" == "timediff" {
+            local method_codes "`method_codes' 18"
+        }
         else {
             display as error "compmethod(): unknown method '`m''"
-            display as error "  valid: jw jaro lev dl jaccard exact numeric dob email postcode nameswap name custom"
+            display as error "  valid: jw jaro lev dl jaccard exact numeric dob email postcode nameswap name abs_date distance_km cosine pctdiff intersect abs_time custom"
             exit 198
         }
     }
@@ -351,6 +415,27 @@ program define splink, rclass
             else {
                 * Other domain/custom: no thresholds
                 local all_thresholds "`all_thresholds'"
+            }
+        }
+    }
+
+    * Bounds check: max 8 thresholds per variable (C plugin limit)
+    forvalues i = 1/`n_comp' {
+        _splink_get_thresh `i' "`all_thresholds'"
+        local _chk_thresh "`r(thresh)'"
+        if "`_chk_thresh'" != "" {
+            * Count commas to determine number of thresholds
+            local _chk_nthresh = 1
+            local _chk_rem "`_chk_thresh'"
+            while strpos("`_chk_rem'", ",") > 0 {
+                local _chk_nthresh = `_chk_nthresh' + 1
+                local _cpos = strpos("`_chk_rem'", ",")
+                local _chk_rem = substr("`_chk_rem'", `_cpos' + 1, .)
+            }
+            if `_chk_nthresh' > 8 {
+                local _chk_v : word `i' of `compvars'
+                display as error "too many thresholds for variable `_chk_v' (`_chk_nthresh'); maximum is 8"
+                exit 198
             }
         }
     }
@@ -458,10 +543,18 @@ program define splink, rclass
             local _br_rule_2 `block2'
         }
         if "`block3'" != "" {
+            if "`block2'" == "" {
+                display as error "block3() requires block2() to be specified"
+                exit 198
+            }
             local n_block_rules = 3
             local _br_rule_3 `block3'
         }
         if "`block4'" != "" {
+            if "`block3'" == "" {
+                display as error "block4() requires block3() to be specified"
+                exit 198
+            }
             local n_block_rules = 4
             local _br_rule_4 `block4'
         }
@@ -538,9 +631,6 @@ program define splink, rclass
         exit 2001
     }
 
-    * --- Create output variable ---
-    quietly gen double `generate' = .
-
     * --- Link variable handling ---
     local has_link = 0
     local link_type_code = 0
@@ -601,6 +691,13 @@ program define splink, rclass
         local tf_flag : word `i' of `tf_flags'
         if "`tf_flag'" == "1" {
             local v : word `i' of `compvars'
+            * Use tfsource variable if specified, else comparison var
+            if "`tfsource'" != "" {
+                local _tf_src_v : word `i' of `tfsource'
+                if "`_tf_src_v'" != "" {
+                    local v "`_tf_src_v'"
+                }
+            }
             tempfile tf_file_`i'
 
             * Compute term frequencies for this variable
@@ -685,6 +782,37 @@ program define splink, rclass
     if "`id'" != "" {
         file write `cfh' "id_var=`id'" _n
     }
+
+    * V3 feature parity options
+    file write `cfh' "recall=`recall'" _n
+
+    local fl_flag = 0
+    if "`fixlambda'" != "" local fl_flag = 1
+    file write `cfh' "fix_lambda=`fl_flag'" _n
+
+    local emnotf_flag = 0
+    if "`emnotf'" != "" local emnotf_flag = 1
+    file write `cfh' "em_without_tf=`emnotf_flag'" _n
+
+    file write `cfh' "cluster_threshold=`clusterthreshold'" _n
+
+    local uwt_flag = 0
+    if `weightthreshold' != -999 local uwt_flag = 1
+    file write `cfh' "use_weight_threshold=`uwt_flag'" _n
+    if `uwt_flag' {
+        file write `cfh' "weight_threshold=`weightthreshold'" _n
+    }
+    else {
+        file write `cfh' "weight_threshold=0" _n
+    }
+
+    file write `cfh' "cluster_method=`cluster_method_code'" _n
+    file write `cfh' "salt_partitions=`salt'" _n
+    if "`roundrobin'" != "" {
+        file write `cfh' "round_robin_em=1" _n
+    }
+    file write `cfh' "em_tol=`emtol'" _n
+
     file write `cfh' _n
 
     * Write per-variable comparison config
@@ -722,6 +850,49 @@ program define splink, rclass
             file write `cfh' "tf_file=" _n
         }
 
+        * Per-comparison null mode
+        if "`nullmode'" != "" {
+            local _nm_val : word `i' of `nullmode'
+            if "`_nm_val'" == "neutral" {
+                file write `cfh' "null_mode=0" _n
+            }
+            else if "`_nm_val'" == "penalize" {
+                file write `cfh' "null_mode=1" _n
+            }
+            else {
+                file write `cfh' "null_mode=-1" _n
+            }
+        }
+        else {
+            file write `cfh' "null_mode=-1" _n
+        }
+
+        * Time unit for abs_time comparison
+        if "`mc'" == "18" {
+            local _tu = lower("`timeunit'")
+            if "`_tu'" == "" local _tu = "days"
+            file write `cfh' "time_unit=`_tu'" _n
+        }
+
+        * TF weight (per-comparison)
+        if "`tfweight'" != "" {
+            local _tw_val : word `i' of `tfweight'
+            if "`_tw_val'" != "" {
+                file write `cfh' "tf_weight=`_tw_val'" _n
+            }
+            else {
+                file write `cfh' "tf_weight=1.0" _n
+            }
+        }
+        else {
+            file write `cfh' "tf_weight=1.0" _n
+        }
+
+        * TF exact only flag
+        local _teo_flag = 0
+        if "`tfexactonly'" != "" local _teo_flag = 1
+        file write `cfh' "tf_exact_only=`_teo_flag'" _n
+
         * Fixed m/u probabilities
         if "`mprob'" != "" {
             _splink_get_thresh `i' "`mprob'"
@@ -755,10 +926,163 @@ program define splink, rclass
             file write `cfh' "fix_u=0" _n
             file write `cfh' "fixed_u=" _n
         }
+
+        * Per-level m/u fixing masks
+        local m_mask = 0
+        local u_mask = 0
+        if `"`fixmlevels'"' != "" {
+            * Parse "comp_idx:level,level|comp_idx:level,level"
+            local fml_rest `"`fixmlevels'"'
+            while `"`fml_rest'"' != "" {
+                gettoken fml_part fml_rest : fml_rest, parse("|")
+                if "`fml_part'" == "|" continue
+                local colon_pos = strpos("`fml_part'", ":")
+                if `colon_pos' > 0 {
+                    local fml_comp = real(substr("`fml_part'", 1, `colon_pos' - 1))
+                    if `fml_comp' == `k' {
+                        local fml_levels = substr("`fml_part'", `colon_pos' + 1, .)
+                        local fml_lrest "`fml_levels'"
+                        while "`fml_lrest'" != "" {
+                            gettoken fml_lev fml_lrest : fml_lrest, parse(",")
+                            if "`fml_lev'" == "," continue
+                            local lev_num = real("`fml_lev'")
+                            local m_mask = `m_mask' + 2^`lev_num'
+                        }
+                    }
+                }
+            }
+        }
+        if `"`fixulevels'"' != "" {
+            local ful_rest `"`fixulevels'"'
+            while `"`ful_rest'"' != "" {
+                gettoken ful_part ful_rest : ful_rest, parse("|")
+                if "`ful_part'" == "|" continue
+                local colon_pos = strpos("`ful_part'", ":")
+                if `colon_pos' > 0 {
+                    local ful_comp = real(substr("`ful_part'", 1, `colon_pos' - 1))
+                    if `ful_comp' == `k' {
+                        local ful_levels = substr("`ful_part'", `colon_pos' + 1, .)
+                        local ful_lrest "`ful_levels'"
+                        while "`ful_lrest'" != "" {
+                            gettoken ful_lev ful_lrest : ful_lrest, parse(",")
+                            if "`ful_lev'" == "," continue
+                            local lev_num = real("`ful_lev'")
+                            local u_mask = `u_mask' + 2^`lev_num'
+                        }
+                    }
+                }
+            }
+        }
+        if `m_mask' > 0 {
+            file write `cfh' "fix_m_mask=`m_mask'" _n
+        }
+        if `u_mask' > 0 {
+            file write `cfh' "fix_u_mask=`u_mask'" _n
+        }
+
         file write `cfh' _n
     }
 
     file close `cfh'
+
+    * --- Supervised m-estimation from label column ---
+    if "`mlabel'" != "" {
+        if "`verbose'" != "" {
+            display as text "splink: supervised m-estimation from label `mlabel'..."
+        }
+
+        * Write gamma-only config (mode=3)
+        tempfile gamma_config gamma_pairs gamma_diag
+        quietly copy "`configfile'" "`gamma_config'", replace
+
+        * Rewrite mode, savepairs, and blocking for gamma-only pass
+        * Override blocking to use label column so same-label pairs are compared
+        tempname gcfh
+        file open `gcfh' using "`gamma_config'", write append
+        file write `gcfh' _n "mode=3" _n
+        file write `gcfh' "save_pairs=`gamma_pairs'" _n
+        file write `gcfh' "n_block_rules=1" _n
+        file close `gcfh'
+
+        * Run gamma-only pass on labeled records
+        preserve
+        quietly keep if `touse' & !missing(`mlabel')
+
+        * Create blocking on the label column for true-match pairs
+        * Use label as blocking var — all same-label records are potential matches
+        tempvar label_block
+        quietly tostring `mlabel', gen(`label_block') force
+
+        if `has_link' & `link_type_code' > 0 {
+            plugin call splink_plugin `label_block' `compvars' `linkvar' `id_part' `generate', ///
+                "`gamma_config'" "`gamma_diag'"
+        }
+        else {
+            plugin call splink_plugin `label_block' `compvars' `id_part' `generate', ///
+                "`gamma_config'" "`gamma_diag'"
+        }
+        restore
+
+        * Parse gamma output and compute m-probabilities
+        * Gamma CSV format: obs_a,obs_b,gamma_0,...,gamma_{n-1}
+        preserve
+        quietly import delimited using "`gamma_pairs'", clear
+
+        local n_comp : word count `compvars'
+        local mprob_override ""
+
+        forvalues k = 0/`=`n_comp'-1' {
+            capture confirm variable gamma_`k'
+            if _rc {
+                continue
+            }
+            * Count levels for this comparison
+            quietly summarize gamma_`k'
+            local max_level = r(max)
+            local n_levels = `max_level' + 1
+
+            * Tabulate to get proportions (m-probs)
+            local level_probs ""
+            local total_valid = 0
+            forvalues lev = 0/`max_level' {
+                quietly count if gamma_`k' == `lev'
+                local total_valid = `total_valid' + r(N)
+            }
+            if `total_valid' > 0 {
+                * First pass: compute raw proportions with floor
+                local sum_floored = 0
+                forvalues lev = 0/`max_level' {
+                    quietly count if gamma_`k' == `lev'
+                    local _mp_`lev' = r(N) / `total_valid'
+                    if `_mp_`lev'' < 0.001 local _mp_`lev' = 0.001
+                    local sum_floored = `sum_floored' + `_mp_`lev''
+                }
+                * Second pass: renormalize so probs sum to 1
+                forvalues lev = 0/`max_level' {
+                    local p = `_mp_`lev'' / `sum_floored'
+                    if `lev' > 0 local level_probs "`level_probs',"
+                    local level_probs "`level_probs'`p'"
+                }
+            }
+            if `k' > 0 local mprob_override "`mprob_override'|"
+            local mprob_override "`mprob_override'`level_probs'"
+        }
+        restore
+
+        if "`verbose'" != "" {
+            display as text "splink: supervised m-probs: `mprob_override'"
+        }
+
+        * Rewrite main config with fixed m-probs from label
+        * Re-open config and append fix_m overrides
+        * The simplest approach: write a supplementary section
+        tempname mcfh
+        file open `mcfh' using "`configfile'", write append
+        file write `mcfh' _n "[MLABEL_M_OVERRIDE]" _n
+        file write `mcfh' "mlabel_mprob=`mprob_override'" _n
+        file close `mcfh'
+
+    }
 
     * --- Diagnostics file ---
     tempfile diagfile
@@ -772,16 +1096,21 @@ program define splink, rclass
     preserve
     quietly keep if `touse'
 
+    * --- Create output variable (after preserve to protect user's dataset) ---
+    quietly gen double `generate' = .
+
     * --- Build plugin call ---
     * Variable order: block_keys, compvars, [linkvar], [idvar], generate
     local id_part ""
     if "`id'" != "" local id_part "`id'"
 
-    if `has_link' {
+    if `has_link' & `link_type_code' > 0 {
+        * link or link_and_dedupe: plugin expects linkvar
         plugin call splink_plugin `block_key_vars' `compvars' `linkvar' `id_part' `generate', ///
             "`configfile'" "`diagfile'"
     }
     else {
+        * dedupe (with or without linkvar) or no linkvar: plugin does not expect linkvar
         plugin call splink_plugin `block_key_vars' `compvars' `id_part' `generate', ///
             "`configfile'" "`diagfile'"
     }
@@ -935,39 +1264,59 @@ program define _splink_save_model
     }
     file close `fh'
 
-    * Write JSON
+    * Write Python-compatible JSON model
     tempname jh
     file open `jh' using "`filepath'", write text replace
     file write `jh' `"{"' _n
     file write `jh' `"  "probability_two_random_records_match": `_d_lambda',"' _n
-    file write `jh' `"  "n_comp": `n_comp',"' _n
+    file write `jh' `"  "link_type": "`_d_link_type'","' _n
     file write `jh' `"  "comparisons": ["' _n
 
     forvalues k = 0/`=`n_comp'-1' {
         local nl = "`_d_comp_`k'_n_levels'"
         local vn = "`_d_comp_`k'_var_name'"
         local meth = "`_d_comp_`k'_method'"
+        local tf_col = "`_d_comp_`k'_tf_column'"
+        local tf_wt = "`_d_comp_`k'_tf_weight'"
         if "`nl'" == "" local nl = 2
         if "`vn'" == "" local vn = "var_`k'"
         if "`meth'" == "" local meth = 0
+        if "`tf_wt'" == "" local tf_wt = 1.0
 
         if `k' > 0 file write `jh' `"    ,"' _n
         file write `jh' `"    {"' _n
         file write `jh' `"      "output_column_name": "gamma_`vn'","' _n
         file write `jh' `"      "comparison_description": "`vn'","' _n
-        file write `jh' `"      "method": `meth',"' _n
+        if "`tf_col'" != "" {
+            file write `jh' `"      "tf_adjustment_column": "`tf_col'","' _n
+            file write `jh' `"      "tf_adjustment_weight": `tf_wt',"' _n
+        }
         file write `jh' `"      "comparison_levels": ["' _n
+
+        * Write null level first (comparison_vector_value = -1)
+        file write `jh' `"        {"' _n
+        file write `jh' `"          "sql_condition": "ELSE","' _n
+        file write `jh' `"          "label_for_charts": "Null","' _n
+        file write `jh' `"          "comparison_vector_value": -1,"' _n
+        file write `jh' `"          "is_null_level": true"' _n
+        file write `jh' `"        }"' _n
 
         forvalues l = 0/`=`nl'-1' {
             local mp = "`_d_m_`k'_`l''"
             local up = "`_d_u_`k'_`l''"
             if "`mp'" == "" local mp = 0.5
             if "`up'" == "" local up = 0.5
+            local cvv = `l'
+            local label = "Level `l'"
+            if `l' == 0 local label = "Else"
+            if `l' == `=`nl'-1' local label = "Exact match"
 
-            if `l' > 0 file write `jh' `"        ,"' _n
+            file write `jh' `"        ,"' _n
             file write `jh' `"        {"' _n
             file write `jh' `"          "sql_condition": "level_`l'","' _n
-            file write `jh' `"          "label_for_charts": "Level `l'","' _n
+            file write `jh' `"          "label_for_charts": "`label'","' _n
+            file write `jh' `"          "comparison_vector_value": `cvv',"' _n
+            file write `jh' `"          "is_null_level": false,"' _n
             file write `jh' `"          "m_probability": `mp',"' _n
             file write `jh' `"          "u_probability": `up'"' _n
             file write `jh' `"        }"' _n

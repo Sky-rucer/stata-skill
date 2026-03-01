@@ -1,4 +1,4 @@
-*! version 1.0.1  26feb2026
+*! version 4.1.0  28feb2026
 *! Threshold sweep for probabilistic record linkage
 *! Computes precision/recall at multiple thresholds for curve generation
 
@@ -9,8 +9,26 @@ program define splink_truthspace, rclass
         [STeps(integer 20) MINThreshold(real 0.0) MAXThreshold(real 1.0) ///
          SAVEResults(string)]
 
+    if `steps' < 1 {
+        display as error "steps() must be >= 1"
+        exit 198
+    }
+
     preserve
     quietly import delimited `using', clear
+
+    capture confirm variable match_probability
+    if _rc {
+        display as error "CSV must contain match_probability column"
+        restore
+        exit 198
+    }
+    capture confirm variable `true'
+    if _rc {
+        display as error "true label variable `true' not found in CSV"
+        restore
+        exit 198
+    }
 
     local step_size = (`maxthreshold' - `minthreshold') / `steps'
 
