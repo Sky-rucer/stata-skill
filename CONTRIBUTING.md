@@ -6,9 +6,9 @@ Thanks for considering a contribution! The easiest way to help is by adding docu
 
 1. **Fork this repo** and create a branch.
 
-2. **Create a new file** in `skills/stata/packages/` named after the package:
+2. **Create a new file** in `plugins/stata/skills/stata/packages/` named after the package:
    ```
-   skills/stata/packages/your-package.md
+   plugins/stata/skills/stata/packages/your-package.md
    ```
 
 3. **Use this template** as a starting point:
@@ -59,12 +59,22 @@ Thanks for considering a contribution! The easiest way to help is by adding docu
    - Related community packages
    ````
 
-4. **Add a routing table entry** in `skills/stata/SKILL.md` under the `### Community Packages` table:
+4. **Add a routing table entry** in `plugins/stata/skills/stata/SKILL.md` under the `### Community Packages` table:
    ```
    | `packages/your-package.md` | Brief description of what it does |
    ```
 
-5. **Open a pull request** with a brief description of the package and why it's useful.
+5. **Add a test task** in `tests/tasks/` that exercises the package. Follow the format of existing tasks (see `tests/README.md`). Your task should:
+   - Ask Claude to solve a realistic problem using the package
+   - Exercise the key options and workflows you documented
+   - Cover at least one gotcha if applicable
+
+   Run the test through the pipeline to verify it passes:
+   ```bash
+   ./tests/scripts/run_pipeline.sh tests/tasks/your_task.md
+   ```
+
+6. **Open a pull request** with a brief description of the package and why it's useful.
 
 ## Guidelines
 
