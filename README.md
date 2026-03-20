@@ -8,6 +8,24 @@ This project contains two Claude Code skills:
 
 As long as you can find an existing package somewhere, you can just let Claude go look at the existing Python package and this skill provides a workflow that Claude can use to develop a replication of whatever it is, implemented in Python or R or whatever, that runs in Stata and uses a C plugin. In many if not most cases, you should be able to get something that runs at least as fast in Stata as it did in the original language, if not faster.
 
+## Installation
+
+Add this repo as a marketplace in Claude Code:
+
+```
+/plugin marketplace add dylantmoore/stata-skill
+```
+
+Then install whichever option fits your needs:
+
+| Plugin | Command |
+|--------|---------|
+| Stata reference only | `/plugin install stata` |
+| C plugin development only | `/plugin install stata-c-plugins` |
+| Both skills | `/plugin install stata-bundle` |
+
+You can also find this and other plugins via the [claude-plugins](https://github.com/dylantmoore/claude-plugins) collection.
+
 ## What's Included
 
 ### Skill 1: Stata
@@ -42,24 +60,6 @@ As long as you can find an existing package somewhere, you can just let Claude g
 - Packaging and distribution via `net install`
 - Translation workflow for porting Python/R packages to Stata
 - Testing strategy with correlation-based validation against reference implementations
-
-## Installation
-
-Add this repo as a marketplace in Claude Code:
-
-```
-/plugin marketplace add dylantmoore/stata-skill
-```
-
-Then install whichever option fits your needs:
-
-| Plugin | Command |
-|--------|---------|
-| Stata reference only | `/plugin install stata` |
-| C plugin development only | `/plugin install stata-c-plugins` |
-| Both skills | `/plugin install stata-bundle` |
-
-You can also find this and other plugins via the [claude-plugins](https://github.com/dylantmoore/claude-plugins) collection.
 
 ## How It Works
 
