@@ -45,10 +45,10 @@ As long as you can find an existing package somewhere, you can just let Claude g
 
 ## Installation
 
-The recommended way to install is through the [claude-plugins](https://github.com/dylantmoore/claude-plugins) marketplace, which lists all of Dylan Moore's Claude Code plugins:
+Add this repo as a marketplace in Claude Code:
 
 ```
-/plugin marketplace add dylantmoore/claude-plugins
+/plugin marketplace add dylantmoore/stata-skill
 ```
 
 Then install whichever option fits your needs:
@@ -58,6 +58,8 @@ Then install whichever option fits your needs:
 | Stata reference only | `/plugin install stata` |
 | C plugin development only | `/plugin install stata-c-plugins` |
 | Both skills | `/plugin install stata-bundle` |
+
+You can also find this and other plugins via the [claude-plugins](https://github.com/dylantmoore/claude-plugins) collection.
 
 ## How It Works
 

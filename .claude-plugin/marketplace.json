@@ -1,0 +1,31 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "stata-skill",
+  "description": "Stata skills for Claude Code — comprehensive reference and C/C++ plugin development",
+  "owner": {
+    "name": "Dylan Moore"
+  },
+  "plugins": [
+    {
+      "name": "stata",
+      "description": "Comprehensive Stata reference for writing correct Stata code — covers syntax, data management, econometrics, causal inference, graphics, Mata, and 20 community packages.",
+      "category": "development",
+      "source": "./plugins/stata",
+      "homepage": "https://github.com/dylantmoore/stata-skill"
+    },
+    {
+      "name": "stata-c-plugins",
+      "description": "Develop high-performance C/C++ plugins for Stata using the stplugin.h SDK. Covers SDK setup, data flow, memory safety, .ado wrappers, cross-platform compilation, performance optimization, debugging, packaging, and translating Python/R packages into Stata.",
+      "category": "development",
+      "source": "./plugins/stata-c-plugins",
+      "homepage": "https://github.com/dylantmoore/stata-skill"
+    },
+    {
+      "name": "stata-bundle",
+      "description": "Both Stata skills in one install — comprehensive Stata reference plus C/C++ plugin development for Stata.",
+      "category": "development",
+      "source": "./",
+      "homepage": "https://github.com/dylantmoore/stata-skill"
+    }
+  ]
+}
