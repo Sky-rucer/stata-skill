@@ -126,6 +126,16 @@ foreach year of local years {
 
 ### forvalues Loop
 
+**GOTCHA: No C-style increment operators.** Stata has no `++`, `--`, `+=`, etc.
+```stata
+* WRONG — Stata is not C
+local i = 0
+local ++i           // error: ++ does not exist
+
+* RIGHT
+local i = `i' + 1
+```
+
 ```stata
 forvalues i = 1/10 {
     display "Iteration `i'"

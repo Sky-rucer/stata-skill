@@ -279,6 +279,15 @@ regress wage ib(first).region
 regress wage ib(last).region
 ```
 
+**GOTCHA: `ib()` prefixes the variable being factored, not its interaction partner.**
+```stata
+* WRONG — ib() on the wrong side of the interaction
+regress y treated#ib(-1).time
+
+* RIGHT — ib() directly prefixes its own variable
+regress y ib(-1).time#1.treated          // base = time period -1
+```
+
 ### Testing Interactions
 ```stata
 regress wage i.gender##c.education
@@ -286,6 +295,18 @@ test 1.gender#c.education               // Is interaction significant?
 
 regress wage i.region##c.education
 testparm i.region#c.education            // Joint test of all interaction terms
+```
+
+**GOTCHA: `test` vs `testparm` for factor variables.** `test` requires you to spell out each
+level explicitly and **cannot parse negative factor levels** (the `-` is read as subtraction).
+Use `testparm` with wildcards or level lists instead:
+```stata
+* WRONG — test cannot handle negative levels or wildcards
+test 1.treated#-5.time   // syntax error: "-" parsed as subtraction
+
+* RIGHT — testparm handles wildcards and level lists
+testparm 1.treated#(-5 -4 -3 -2).time   // specific levels
+testparm lead*                            // wildcard on manual dummies
 ```
 
 ### Centering for Interpretation

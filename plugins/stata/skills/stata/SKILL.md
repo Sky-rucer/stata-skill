@@ -100,20 +100,28 @@ keep if lower(gender) == "male"
 ```
 
 ### `merge` Always Check `_merge`
+Never skip `tab _merge` — it costs nothing and is the only diagnostic you get when `assert` fails.
 ```stata
 merge 1:1 id using other.dta
-tab _merge                      // always inspect
-assert _merge == 3              // or handle mismatches
+tab _merge                      // ALWAYS tab before assert
+assert _merge == 3              // fails silently without tab output
 drop _merge
 ```
 
-### `preserve` / `restore` for Temporary Changes
+### `preserve` / `restore` + `tempfile` for Collapse-Merge-Back
+The standard pattern for computing group stats and merging them onto the original data:
 ```stata
+tempfile stats
 preserve
-collapse (mean) income, by(state)
-* ... do something with collapsed data ...
-restore   // original data is back
+collapse (mean) avg_x=x, by(group)
+save `stats'
+restore
+merge m:1 group using `stats'
+tab _merge
+assert _merge == 3
+drop _merge
 ```
+For simple group means, `bysort group: egen avg_x = mean(x)` avoids the round-trip entirely.
 
 ### Weights Are Not Interchangeable
 - `fweight` — frequency weights (replication)
@@ -286,6 +294,7 @@ Read only the files relevant to the user's task. Paths are relative to this SKIL
 | `references/tables-reporting.md` | `putexcel`, `putdocx`, `putpdf`, LaTeX integration, `collect` |
 | `references/workflow-best-practices.md` | Project structure, master do-files, version control, debugging, common mistakes |
 | `references/external-tools-integration.md` | Python via `python:`, R via `rsource`, shell commands, Git |
+| `references/filing-issues.md` | User wants to report a Stata skill documentation gap or error to the repository |
 
 ### Community Packages
 | File | What It Does |
@@ -400,3 +409,15 @@ mi register imputed income education
 mi impute chained (regress) income (ologit) education = age i.gender, add(20) rseed(12345)
 mi estimate: regress wage income education age i.gender
 ```
+
+---
+
+## Help Improve This Skill
+
+If you produce Stata code with a significant error — wrong syntax, incorrect command usage, or a gotcha you failed to catch — and the issue seems to stem from a gap in these reference files rather than a one-off mistake, consider suggesting to the user that they file an issue on the skill repository. This helps future users.
+
+**When to raise this:** Only after you've already corrected the error and the user has working code. Frame it as optional: *"I made an error with [X] that I think comes from a gap in the Stata skill documentation. If you'd like, I can help you file an issue or a PR so it gets fixed for everyone."*
+
+**When NOT to raise this:** If the user is on Claude Haiku, the error is more likely a model capability issue than a documentation gap. In that case, suggest they try Sonnet or Opus for complex Stata work instead of filing an issue.
+
+If the user agrees, read `references/filing-issues.md` for instructions on writing a good issue report.

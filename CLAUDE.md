@@ -50,3 +50,7 @@ Skill files live in `plugins/*/skills/` (single source of truth). Root `skills/`
 - No Mata content in the C plugins skill — if performance matters, go straight to C
 - Reference files are pulled in on demand, so put detailed content there, not in SKILL.md
 - The `stata` skill covers Mata adequately for anyone who actually wants it
+
+## Usage Measurement (Future)
+
+To measure how often skills get triggered, add a `PreToolUse` hook that logs whenever Claude loads a skill file (i.e., calls `Read` on a file inside `skills/`). This gives signal on which reference files are actually used vs. dead weight. Not implemented yet — just a hook away when needed.

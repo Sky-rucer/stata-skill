@@ -96,11 +96,24 @@ estimates stats ar1 arma11
 
 // Post-estimation
 arima inv, ar(1) ma(1)
-predict inv_fitted
+predict inv_fitted, y               // Fitted values in levels
 predict inv_resid, residuals
 wntestq inv_resid                   // Residual autocorrelation test
-predict inv_forecast, dynamic(tq(2000q1))
+predict inv_forecast, y dynamic(tq(2000q1))  // Dynamic forecast in levels
 ```
+
+**Gotcha — `predict` options after `arima` are NOT the same as after `regress`:**
+
+| Option | What it returns | When to use |
+|--------|----------------|-------------|
+| `y` (default) | Predictions in the original (level) scale | Almost always — this is what you want |
+| `xb` | Linear prediction of the **differenced** series when d>0 | Rarely — only for inspecting the ARMA component |
+| `residuals` | Residuals | Diagnostics |
+| `mse` | Mean squared error of the `y` prediction | Confidence intervals |
+
+- **`stdp` does NOT exist** after `arima`. It is a `regress`/`glm` option. Use `predict ..., mse` then `gen se = sqrt(mse_var)` instead.
+- When the model includes differencing (e.g., `arima D.inv, ar(1) ma(1)` or `arima(1,1,1)`), `predict, xb` gives predictions of D.inv, NOT inv. You must use `predict, y` to get back-transformed level predictions.
+- `dynamic()` should be paired with `y` (or used alone, since `y` is the default). Using `dynamic()` with `xb` gives dynamic predictions of the differenced series, not levels.
 
 ### Complete Workflow
 
@@ -113,7 +126,7 @@ pac D.gdp                          // PACF
 arima D.gdp, ar(1) ma(1)           // Estimate
 predict resid, residuals
 wntestq resid                      // Diagnostics
-predict gdp_forecast, dynamic(tq(2023q1))
+predict gdp_forecast, y dynamic(tq(2023q1))  // y = levels, not differenced
 ```
 
 ---
@@ -203,10 +216,15 @@ tsline inv inc cons                 // Multiple series
 // With options
 tsline inv, title("Investment") ytitle("Value") xlabel(, angle(45))
 
+// Vertical reference lines — use xline(), NOT tline()
+tsline inv, xline(1970q1, lcolor(red) lpattern(dash))
+
 // ACF and PACF
 ac gdp, lags(20)
 pac gdp, lags(20)
 ```
+
+**Gotcha — `tline()` vs `xline()`:** Use `xline()` for vertical reference lines on time series plots. `tline()` exists in some contexts but does NOT accept styling suboptions like `lcolor()` or `lpattern()`. Always use `xline(timevalue, lcolor(...) lpattern(...))` instead.
 
 ---
 
@@ -216,26 +234,39 @@ pac gdp, lags(20)
 
 ```stata
 arima inv, ar(1) ma(1)
-predict inv_static                          // Uses actual values for lags
-predict inv_dynamic, dynamic(tq(2000q1))    // Uses predicted values for lags
+predict inv_static, y                       // One-step-ahead (uses actual lags)
+predict inv_dynamic, y dynamic(tq(2000q1))  // Multi-step (uses predicted lags)
 ```
 
 ### Forecasting Beyond Sample
 
 ```stata
 tsappend, add(8)                            // Extend dataset
-arima inv, ar(2) ma(1)
-predict inv_forecast, dynamic(tq(1999q1))
-predict inv_se, mse                         // Forecast standard errors
+arima D.inv, ar(2) ma(1)                    // ARIMA with differencing
 
-// Confidence intervals
-generate inv_upper = inv_forecast + 1.96*sqrt(inv_se)
-generate inv_lower = inv_forecast - 1.96*sqrt(inv_se)
+// Forecast in levels (y), not differenced series (xb)
+predict inv_forecast, y dynamic(tq(1999q1))
+
+// CI must use mse with MATCHING dynamic() origin
+predict inv_mse, mse dynamic(tq(1999q1))
+generate inv_upper = inv_forecast + 1.96*sqrt(inv_mse)
+generate inv_lower = inv_forecast - 1.96*sqrt(inv_mse)
 
 // Plot with CI bands
 twoway (tsline inv) ///
     (tsline inv_forecast, lpattern(dash)) ///
     (rarea inv_upper inv_lower qtr, color(red%20))
+```
+
+**Gotcha — dynamic forecast CIs must use `mse dynamic()`:** The `mse` from a static prediction is a one-step-ahead MSE. If you plot it against a dynamic multi-step forecast, the CIs will be too narrow and will not widen over the forecast horizon. Always match `dynamic()` in both the `y` prediction and the `mse` prediction:
+```stata
+// WRONG: static mse applied to dynamic forecast
+predict yhat_dyn, y dynamic(tq(2000q1))
+predict yhat_mse, mse                         // static — does NOT match!
+
+// RIGHT: both use the same dynamic() origin
+predict yhat_dyn, y dynamic(tq(2000q1))
+predict yhat_mse, mse dynamic(tq(2000q1))    // dynamic — CIs widen correctly
 ```
 
 ### Exponential Smoothing

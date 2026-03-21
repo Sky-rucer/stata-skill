@@ -150,6 +150,15 @@ merge 1:1 person_id using dataset2, keep(3) keepusing(income age)
 merge 1:1 id using updates, update replace
 ```
 
+**Gotcha: Always `tab _merge` before `assert` or `drop`:**
+```stata
+merge m:1 state using state_data
+tab _merge              // inspect: how many matched vs unmatched?
+assert _merge == 3      // now assert — if it fails, tab output shows why
+drop _merge
+```
+Skipping `tab _merge` and jumping straight to `assert _merge == 3` gives no diagnostic output when the assert fails. The `tab` costs nothing and makes debugging merge mismatches trivial.
+
 **Always check uniqueness before merging:**
 ```stata
 isid id              // Verify id uniquely identifies observations
@@ -232,6 +241,42 @@ format month %tm
 collapse (mean) avg_price=price (firstnm) open_price=price ///
          (lastnm) close_price=price, by(stock_id month)
 ```
+
+### Collapse and Merge Back (preserve/tempfile Pattern)
+
+This is the standard pattern for computing group statistics via `collapse` and attaching them back to the original data. The `egen` approach (below) is simpler for basic stats, but collapse supports statistics `egen` cannot (e.g., `sd`, percentiles, weighted stats, multiple stats at once).
+
+```stata
+sysuse auto, clear
+tempfile groupstats
+preserve
+
+collapse (mean) mean_price=price mean_mpg=mpg, by(foreign)
+save `groupstats'
+
+restore
+
+merge m:1 foreign using `groupstats'
+tab _merge              // always inspect before asserting
+assert _merge == 3      // all obs must match (groups came from same data)
+drop _merge
+
+gen price_demeaned = price - mean_price
+```
+
+**Key points:**
+- `preserve` before `collapse` (collapse destroys the dataset)
+- `save` the collapsed data to a `tempfile` (auto-deleted when Stata exits)
+- `restore` brings back the original data, then `merge m:1` attaches group stats
+- Always `tab _merge` before `assert _merge == 3` — if the assert fails, `tab` output in the log tells you why
+
+**When `egen` is simpler:** For basic group means, `egen` avoids the entire preserve/collapse/merge round-trip:
+```stata
+bysort foreign: egen mean_price = mean(price)
+bysort foreign: egen mean_mpg = mean(mpg)
+gen price_demeaned = price - mean_price
+```
+Use collapse-merge-back when you need statistics `egen` doesn't support, or when computing many stats at once.
 
 ### Preserving Labels
 ```stata

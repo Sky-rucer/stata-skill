@@ -131,24 +131,25 @@ generate rel_time = year - treatment_year
 replace rel_time = -999 if missing(treatment_year)  // Never treated
 
 * Create event time dummies (omit -1 as base period)
-quietly: summarize rel_time
-local min = r(min)
-local max = r(max)
-forvalues k = `min'/`max' {
-    if `k' != -1 & `k' != -999 {
-        generate lead_lag_`k' = (rel_time == `k')
-    }
+* GOTCHA: Variable names cannot contain hyphens, so never embed a negative
+* `k' directly in a name (e.g., lead_lag_-5 is illegal). Use lead/lag prefixes.
+forvalues k = 5(-1)2 {
+    generate lead`k' = (rel_time == -`k')
+}
+forvalues k = 0/5 {
+    generate lag`k' = (rel_time == `k')
 }
 
 * Event study regression
-reghdfe outcome lead_lag_*, absorb(unit_id year) vce(cluster unit_id)
+reghdfe outcome lead* lag*, absorb(unit_id year) vce(cluster unit_id)
 
 * Plot event study coefficients
 preserve
 parmest, saving(event_study.dta, replace)
 use event_study.dta, clear
-keep if regexm(parm, "lead_lag")
-generate event_time = real(regexr(parm, "lead_lag_", ""))
+keep if regexm(parm, "^(lead|lag)")
+generate event_time = real(regexr(parm, "lead", "-"))
+replace event_time = real(regexr(parm, "lag", "")) if missing(event_time)
 sort event_time
 twoway (scatter estimate event_time) ///
        (rcap min95 max95 event_time), ///
@@ -209,12 +210,14 @@ generate rel_time_binned = rel_time
 replace rel_time_binned = -5 if rel_time < -5 & rel_time != -999
 replace rel_time_binned = 5 if rel_time > 5
 
-forvalues k = -5/5 {
-    if `k' != -1 {
-        generate event_`k' = (rel_time_binned == `k')
-    }
+* Same lead/lag naming to avoid hyphens in variable names
+forvalues k = 5(-1)2 {
+    generate lead`k' = (rel_time_binned == -`k')
 }
-reghdfe outcome event_*, absorb(unit_id year) vce(cluster unit_id)
+forvalues k = 0/5 {
+    generate lag`k' = (rel_time_binned == `k')
+}
+reghdfe outcome lead* lag*, absorb(unit_id year) vce(cluster unit_id)
 ```
 
 ### Automated Event Study (csdid)
@@ -254,10 +257,10 @@ restore
 ### Formal Tests for Pre-Trends
 
 ```stata
-reghdfe outcome event_*, absorb(unit_id year) vce(cluster unit_id)
+reghdfe outcome lead* lag*, absorb(unit_id year) vce(cluster unit_id)
 
 * Joint test of pre-treatment leads
-test event_-5 event_-4 event_-3 event_-2
+test lead5 lead4 lead3 lead2
 ```
 
 ### Placebo Tests

@@ -14,6 +14,10 @@ bootstrap r(p50), reps(1000): summarize mpg, detail
 bootstrap: regress mpg weight foreign       // All coefficients from e(b)
 bootstrap f=e(F): regress mpg weight foreign
 
+// ALWAYS name statistics explicitly -- do NOT rely on auto-names like _bs_1
+bootstrap weight_coef=_b[weight], reps(500) seed(42): regress price weight mpg
+// Now access _b[weight_coef], _se[weight_coef] -- not _b[_bs_1]
+
 // Quantile regression (bootstrap SEs recommended)
 bootstrap, reps(200): qreg price weight length foreign
 ```
@@ -54,6 +58,17 @@ bootstrap, cluster(idcode) idcluster(newid) reps(200): xtreg y x1 x2, fe
 
 ```stata
 simulate exp_list, reps(#) [options]: command
+```
+
+**GOTCHA -- comma placement:** The comma separates the expression list from options. It goes AFTER the last `name=expr` and BEFORE `reps()`. Getting this wrong is a fatal syntax error:
+
+```stata
+// WRONG: comma after last expression then options without comma
+simulate b=r(b) se=r(se) cover=r(cover) reps(1000): myprog     // ERROR
+simulate b=r(b) se=r(se) cover=r(cover), reps(1000),: myprog   // ERROR
+
+// RIGHT: single comma separating expressions from options
+simulate b=r(b) se=r(se) cover=r(cover), reps(1000) seed(123): myprog
 ```
 
 ```stata
@@ -276,6 +291,33 @@ bootstrap, cluster(idcode) idcluster(newid) reps(400): ///
 4. Assuming normality without checking bootstrap distribution
 5. Forgetting to `preserve`/`restore` data in custom programs
 6. Using variance instead of SD in `rnormal()` -- N(0, sigma^2) requires `rnormal(0, sqrt(sigma^2))`, not `rnormal(0, sigma^2)`
+7. **`r()` results overwritten by each command** -- each `summarize` call overwrites `r(mean)`, `r(sd)`, etc. Store to locals before the next call:
+
+```stata
+// WRONG: r(mean) from first summarize is gone after second
+quietly summarize b_x
+di r(mean)                  // OK here
+quietly summarize se_x      // overwrites r(mean)!
+di r(mean)                  // this is now mean of se_x, not b_x
+
+// RIGHT: store to locals immediately
+quietly summarize b_x
+local mean_b = r(mean)
+local sd_b = r(sd)
+quietly summarize se_x
+local mean_se = r(mean)
+di `mean_b'                 // safe
+```
+
+8. **`di` with format + arithmetic needs parentheses:**
+
+```stata
+// WRONG: Stata cannot parse subtraction after format specifier
+di %8.4f r(mean) - 3
+
+// RIGHT: wrap the expression in parentheses
+di %8.4f (r(mean) - 3)
+```
 
 ### Related Commands
 

@@ -1,116 +1,134 @@
 # Stata Skill Test Suite
 
-Automated evaluation pipeline for the `stata` Claude Code skill. Runs test tasks through the skill, judges the output against a rubric, and proposes concrete improvements.
+Automated evaluation pipeline for the `stata` Claude Code skill. Sends test tasks to a fresh Claude instance with the skill loaded, judges the output against a rubric, and reports scores with metrics.
 
 ## Quick Start
 
 ```bash
-# Run a single task through the full pipeline (run + judge + propose)
-./tests/scripts/run_pipeline.sh tests/tasks/task_01_data_cleaning.md
+# Single task — score + metrics
+python tests/eval.py tests/tasks/task_01_data_cleaning.md
 
-# Run just the test (no judging)
-./tests/scripts/run_test.sh tests/tasks/task_07_did.md
+# Multiple runs for variance analysis
+python tests/eval.py tests/tasks/task_01_data_cleaning.md --runs 5
 
-# Run all 14 tasks (test only)
-./tests/scripts/run_all.sh
+# All tasks
+python tests/eval.py tests/tasks/task_*.md
 
-# Dry run — list tasks without executing
-./tests/scripts/run_all.sh --dry-run
+# Save results as a baseline
+python tests/eval.py tests/tasks/task_*.md --runs 3 --save tests/results/baseline.json
 
-# Judge an existing run
-./tests/scripts/judge.sh tests/results/run_001
+# Compare current results against a baseline
+python tests/eval.py tests/tasks/task_*.md --runs 3 --compare tests/results/baseline.json
 
-# Propose skill edits from judge findings
-./tests/scripts/propose_changes.sh tests/results/run_001
+# Override model (default: claude-sonnet-4-6)
+python tests/eval.py tests/tasks/task_01_data_cleaning.md --model claude-opus-4-6
 ```
 
-## Pipeline
+## How It Works
 
-Each test task goes through three stages:
-
-```
-task_*.md ──> run_test.sh ──> judge.sh ──> propose_changes.sh
-                  │                │                │
-                  v                v                v
-           transcript.json  judge_findings.md  proposed_changes.md
-```
-
-### Stage 1: Run (`run_test.sh`)
-
-Extracts the prompt from the `## Task Prompt` section of a task file and sends it to `claude --print --output-format json`. The CLI inherits the user's full environment including installed skills.
-
-**Outputs** (in `tests/results/run_NNN/`):
-- `transcript.json` — full Claude response
-- `task.md` — copy of the original task
-- `metadata.json` — run number, timestamp, duration
-- `stderr.log` — any CLI errors
-
-### Stage 2: Judge (`judge.sh`)
-
-Sends the task, transcript, and rubric to Claude and asks it to score each of the 7 rubric categories (1-5). The rubric uses weighted scoring: PRIMARY categories (syntax, command selection, options, information retrieval) count 2x, SECONDARY categories (gotcha awareness, completeness, idiomaticness) count 1x. Maximum weighted total is 55.
-
-**Outputs:**
-- `judge_findings.md` — scores, justifications, errors found, strengths/weaknesses
-
-### Stage 3: Propose (`propose_changes.sh`)
-
-Sends the judge findings, transcript, task, and the current `skills/stata/SKILL.md` (plus file listings) to Claude. Asks for concrete, actionable edits: file path, action (add/modify/create), content, priority, and justification tied to specific judge findings.
-
-**Outputs:**
-- `proposed_changes.md` — specific file edits to improve the skill
-
-## Directory Structure
+`eval.py` uses the Claude Agent SDK to run two independent `query()` calls per test:
 
 ```
-tests/
-├── README.md            # This file
-├── coverage_map.md      # Skill capability inventory (used to design tasks)
-├── rubric.md            # 7-category scoring rubric with weighted totals
-├── tasks/               # 14 test task files
-│   ├── task_01_data_cleaning.md
-│   ├── task_02_merge_reshape.md
-│   ├── ...
-│   └── task_14_mata_basics.md
-├── scripts/
-│   ├── run_test.sh      # Run single task
-│   ├── run_all.sh       # Run all tasks
-│   ├── judge.sh         # Score against rubric
-│   ├── propose_changes.sh  # Propose skill edits
-│   └── run_pipeline.sh  # Full pipeline (run + judge + propose)
-└── results/             # Auto-created run directories
-    └── run_NNN/
-        ├── task.md
-        ├── transcript.json
-        ├── metadata.json
-        ├── stderr.log
-        ├── judge_findings.md
-        └── proposed_changes.md
+task_*.md ──> Test Agent ──> Judge Agent ──> results/run_NNN/
+                 │                │
+                 v                v
+          transcript.json   judge_findings.md
+                                  │
+                                  v
+                            metadata.json (score, cost, tokens, time)
+```
+
+1. **Test Agent** — receives the task prompt, runs with the skill loaded via `cwd` auto-discovery (the repo's `.claude-plugin/plugin.json`). Unlimited turns, `bypassPermissions` mode.
+2. **Judge Agent** — receives the task, rubric, and transcript. Scores 7 categories (1-5 each) and computes a weighted total out of 55.
+
+Each `query()` call is stateless — no context bleed between tests.
+
+## Pipeline Modes
+
+### Single Run
+```bash
+python tests/eval.py tests/tasks/task_07_did.md
+```
+Produces one `run_NNN/` directory with score, transcript, judge findings, and metadata.
+
+### Variance Analysis (`--runs N`)
+```bash
+python tests/eval.py tests/tasks/task_07_did.md --runs 5
+```
+Runs the same task N times and reports mean, stdev, and range. Use this to measure consistency. Aim for stdev < 3. High variance signals a documentation gap that causes the agent to take different (sometimes wrong) approaches.
+
+### A/B Comparison (`--compare`)
+```bash
+# Before editing docs
+python tests/eval.py tests/tasks/task_*.md --runs 3 --save tests/results/before.json
+
+# After editing docs
+python tests/eval.py tests/tasks/task_*.md --runs 3 --compare tests/results/before.json
+```
+Prints a delta table showing score changes per task. Look for: mean going up, stdev flat or down, no new failure modes in judge findings. If scores drop, the edit may have introduced confusing examples — simpler is better.
+
+### Parallel Execution
+To run multiple tasks in parallel, launch separate processes:
+```bash
+python tests/eval.py tests/tasks/task_01_data_cleaning.md --runs 5 &
+python tests/eval.py tests/tasks/task_07_did.md --runs 5 &
+wait
+```
+Run directories are created atomically, so parallel execution is safe.
+
+## Output Structure
+
+Each run creates `tests/results/run_NNN/` containing:
+
+| File | Contents |
+|------|----------|
+| `task.md` | Copy of the original task file |
+| `transcript.json` | `{"result": "..."}` — the test agent's full response |
+| `judge_findings.md` | Per-category scores, justifications, errors, strengths/weaknesses |
+| `metadata.json` | Score, model, cost, tokens, duration, timestamp |
+
+### metadata.json fields
+
+```json
+{
+    "task_file": "task_01_data_cleaning.md",
+    "model": "claude-sonnet-4-6",
+    "score": 54,
+    "score_max": 55,
+    "test_duration_ms": 36179,
+    "test_cost_usd": 0.0548,
+    "test_usage": { "input_tokens": ..., "output_tokens": ..., ... },
+    "test_num_turns": 1,
+    "judge_duration_ms": 32319,
+    "judge_cost_usd": 0.0401,
+    "timestamp": "2026-03-20T19:19:50Z"
+}
 ```
 
 ## Task File Format
-
-Task files must follow this structure:
 
 ```markdown
 # Task N: Title
 
 ## Task Prompt
 
-The actual prompt sent to Claude. Everything under this heading
+The actual prompt sent to the test agent. Everything under this heading
 (until the next ## or # heading, or end of file) is extracted.
 
 ## Capabilities Exercised
 
-- What skill areas this tests
+- What skill areas this tests (gotchas, commands, patterns)
 
 ## Reference Files
 
-- Which skill reference files are relevant
+- Which skill reference files are relevant to this task
 ```
 
-The `## Task Prompt` heading is required. The runner extracts everything between it and the next same-level heading.
+The `## Task Prompt` heading is required.
 
-## Rubric Categories
+## Rubric
+
+Scoring rubric is in `tests/rubric.md`. Seven categories, weighted:
 
 | # | Category | Weight | What it measures |
 |---|----------|--------|------------------|
@@ -122,10 +140,30 @@ The `## Task Prompt` heading is required. The runner extracts everything between
 | 6 | Completeness | SECONDARY (1x) | Addressed all parts of the request |
 | 7 | Idiomaticness | SECONDARY (1x) | Follows Stata conventions |
 
-**Weighted total**: (sum of PRIMARY scores) * 2 + (sum of SECONDARY scores) = max 55
+**Weighted total**: (sum of PRIMARY) * 2 + (sum of SECONDARY) = max 55
+
+## Improving Documentation Based on Test Results
+
+The test-and-improve workflow:
+
+1. **Run with variance** (`--runs 3+`) and save a baseline
+2. **Read judge findings** from the lowest-scoring runs — they identify specific documentation gaps
+3. **Edit the reference file** to address the gap (add a gotcha, fix an example, clarify an option)
+4. **Re-run and compare** against the baseline
+5. **Check for regressions** — if scores drop, the edit may be too complex. Keep examples simple; overly clever code patterns get cargo-culted incorrectly
+
+Common documentation issues that lower scores:
+- Missing gotcha warnings (missing values, variable naming, operator precedence)
+- Incorrect or incomplete code examples
+- Complex patterns that the agent reproduces incorrectly (prefer simple, direct examples)
+- Conflicting patterns across sections of the same reference file
+
+## Legacy Bash Scripts
+
+The `tests/scripts/` directory contains the original bash pipeline (`run_test.sh`, `judge.sh`, `propose_changes.sh`, `run_pipeline.sh`). These still work for quick one-offs but lack metrics tracking, variance analysis, and A/B comparison. Use `eval.py` for all testing.
 
 ## Requirements
 
-- `claude` CLI installed and authenticated
-- `jq` recommended (for JSON parsing; scripts fall back to raw content)
-- Bash 4+
+- Python 3.10+
+- `claude-agent-sdk` (installed via `pip install claude-agent-sdk`)
+- Claude Code authenticated (the SDK inherits auth from the session)
