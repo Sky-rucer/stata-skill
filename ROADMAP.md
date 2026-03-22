@@ -2,6 +2,8 @@
 
 Big-picture directions for improving the skill. These are open problems, not specifications — if you have ideas on any of them, open an issue or PR.
 
+This is also a good place to learn about building Claude Code skills. The problems below — how to test documentation quality, how to structure reference material for agents, how to give agents dynamic access to help systems — apply to skill development in general, not just Stata.
+
 ## Real-world empirical test suite
 
 The current tests are synthetic prompts. But there's a huge amount of publicly available empirical work — published papers with replication data, public-use datasets, well-known textbook exercises. A stronger test suite would hand the agent a real dataset and a real task (e.g., replicate the core specification from a paper). The goal isn't perfect replication — there will always be variation. The goal is: can the agent find the right tools, write code that actually runs, and get in the ballpark? That's what tells you whether the documentation is doing its job.

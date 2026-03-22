@@ -1,6 +1,22 @@
 # Contributing to stata-skill
 
-Thanks for considering a contribution! The easiest way to help is by adding documentation for a Stata package you know well.
+Thanks for considering a contribution! There are several ways to help:
+
+- **Add documentation** for a Stata package you know well (see [Adding a New Package](#adding-a-new-package))
+- **Report issues or submit PRs** based on problems you hit in your own Stata work (see [Report real-world issues](#report-real-world-issues))
+- **Suggest new tests** based on real-world usage (see [Suggest new tests](#suggest-new-tests))
+- **Tackle a bigger-picture item** on the [ROADMAP.md](ROADMAP.md) (see [Tackle a roadmap item](#tackle-a-roadmap-item))
+
+## Contents
+
+- [Adding a New Package](#adding-a-new-package)
+- [Guidelines](#guidelines)
+- [Other Ways to Contribute](#other-ways-to-contribute)
+  - [Report real-world issues](#report-real-world-issues)
+  - [Suggest new tests](#suggest-new-tests)
+  - [Improve existing docs](#improve-existing-docs)
+  - [Tackle a roadmap item](#tackle-a-roadmap-item)
+- [Questions?](#questions)
 
 ## Adding a New Package
 
