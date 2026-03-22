@@ -5,6 +5,7 @@ Thanks for considering a contribution! There are several ways to help:
 - **Add documentation** for a Stata package you know well (see [Adding a New Package](#adding-a-new-package))
 - **Report issues or submit PRs** based on problems you hit in your own Stata work (see [Report real-world issues](#report-real-world-issues))
 - **Suggest new tests** based on real-world usage (see [Suggest new tests](#suggest-new-tests))
+- **Pick up an open issue** from the [issue tracker](https://github.com/dylantmoore/stata-skill/issues) (see [Tackle outstanding issues](#tackle-outstanding-issues))
 - **Tackle a bigger-picture item** on the [ROADMAP.md](ROADMAP.md) (see [Tackle a roadmap item](#tackle-a-roadmap-item))
 
 ## Contents
@@ -15,6 +16,7 @@ Thanks for considering a contribution! There are several ways to help:
   - [Report real-world issues](#report-real-world-issues)
   - [Suggest new tests](#suggest-new-tests)
   - [Improve existing docs](#improve-existing-docs)
+  - [Tackle outstanding issues](#tackle-outstanding-issues)
   - [Tackle a roadmap item](#tackle-a-roadmap-item)
 - [Questions?](#questions)
 
@@ -148,6 +150,10 @@ The best test ideas come from real-world usage. If you hit a case where Claude s
 ### Improve existing docs
 
 Found an error or want to add a missing option? PRs for existing files are welcome. Keep changes focused and explain what you're fixing. If you can, run the eval pipeline before and after to show the improvement.
+
+### Tackle outstanding issues
+
+Check the [issue tracker](https://github.com/dylantmoore/stata-skill/issues) for open issues. Many are labeled `help wanted` and have specific, well-scoped tasks — like adding test coverage for a reference file that doesn't have any yet.
 
 ### Tackle a roadmap item
 
