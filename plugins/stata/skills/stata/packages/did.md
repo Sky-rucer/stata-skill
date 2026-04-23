@@ -17,6 +17,8 @@ Traditional two-way fixed effects (TWFE) regression can produce biased estimates
 - **eventstudyinteract**: Sun-Abraham interaction-weighted estimator
 - **stackedev**: Stacked event study approach
 
+For a dedicated package note focused on `csdid` syntax, options, postestimation, and workflow examples, see `packages/csdid.md`.
+
 ### Installation
 
 ```stata
